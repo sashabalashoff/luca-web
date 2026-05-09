@@ -1,0 +1,73 @@
+common:
+  appName: "LUCA"
+  loading: "Загрузка..."
+  save: "Сохранить"
+  cancel: "Отмена"
+  confirm: "Подтвердить"
+  delete: "Удалить"
+  edit: "Изменить"
+  language: "Язык"
+  theme: "Тема"
+  logout: "Выйти"
+
+landing:
+  badge: "AI-first финансовое пространство"
+  title: "Твой AI CFO для личных и бизнес-финансов"
+  subtitle: "Веди доходы, расходы и cash flow просто рассказывая LUCA, что произошло."
+  cta: "Открыть приложение"
+  secondaryCta: "Попробовать демо"
+
+auth:
+  title: "Добро пожаловать в LUCA"
+  subtitle: "Войди в своё AI-first финансовое пространство."
+  emailPlaceholder: "you@example.com"
+  emailButton: "Продолжить через email"
+  googleButton: "Продолжить через Google"
+  checkEmail: "Проверь почту. Magic link отправлен."
+
+navigation:
+  chat: "Чат"
+  transactions: "Транзакции"
+  dashboard: "Дашборд"
+  reports: "Отчёты"
+  goals: "Цели"
+  settings: "Настройки"
+
+chat:
+  title: "LUCA Chat"
+  subtitle: "Расскажи LUCA, что произошло с деньгами."
+  placeholder: "Потратил $52 в Nobu вчера..."
+  intro: "Расскажи, что произошло с деньгами. Например: «Потратил $52 в Nobu вчера» или «Получил $1200 от клиента Alex»."
+  thinking: "LUCA думает..."
+  confirmAndSave: "Подтвердить и сохранить"
+  saved: "Готово. Я сохранил транзакцию."
+  tryPrompts: "Попробуй"
+  defaultAccount: "Основной счёт"
+  aiCommandCenter: "AI финансовый командный центр"
+
+dashboard:
+  title: "Дашборд"
+  subtitle: "Текущий месяц"
+  income: "Доходы"
+  expenses: "Расходы"
+  net: "Чистый остаток"
+  savingsRate: "Норма накопления"
+  topCategories: "Главные категории"
+  noData: "Данных по расходам пока нет."
+
+transactions:
+  title: "Транзакции"
+  subtitle: "Финансовые события"
+  empty: "Транзакций пока нет. Добавь первую через чат."
+
+reports:
+  title: "Отчёты"
+  subtitle: "Cash flow, категории и AI-сводки."
+
+goals:
+  title: "Цели"
+  subtitle: "Финансовые цели и бизнес-таргеты."
+
+settings:
+  title: "Настройки"
+  subtitle: "Workspace, счета, категории и предпочтения."

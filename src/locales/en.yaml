@@ -1,0 +1,73 @@
+common:
+  appName: "LUCA"
+  loading: "Loading..."
+  save: "Save"
+  cancel: "Cancel"
+  confirm: "Confirm"
+  delete: "Delete"
+  edit: "Edit"
+  language: "Language"
+  theme: "Theme"
+  logout: "Log out"
+
+landing:
+  badge: "AI-first financial workspace"
+  title: "Your AI CFO for personal and business money"
+  subtitle: "Track income, expenses and cash flow by simply telling LUCA what happened."
+  cta: "Open app"
+  secondaryCta: "Try demo"
+
+auth:
+  title: "Welcome to LUCA"
+  subtitle: "Sign in to your AI-first financial workspace."
+  emailPlaceholder: "you@example.com"
+  emailButton: "Continue with email"
+  googleButton: "Continue with Google"
+  checkEmail: "Check your email. Magic link sent."
+
+navigation:
+  chat: "Chat"
+  transactions: "Transactions"
+  dashboard: "Dashboard"
+  reports: "Reports"
+  goals: "Goals"
+  settings: "Settings"
+
+chat:
+  title: "LUCA Chat"
+  subtitle: "Tell LUCA what happened with your money."
+  placeholder: "Spent $52 at Nobu yesterday..."
+  intro: "Tell me what happened with your money. For example: “Spent $52 at Nobu yesterday” or “Got $1200 from client Alex”."
+  thinking: "LUCA is thinking..."
+  confirmAndSave: "Confirm and save"
+  saved: "Done. I saved this transaction."
+  tryPrompts: "Try prompts"
+  defaultAccount: "Default account"
+  aiCommandCenter: "AI financial command center"
+
+dashboard:
+  title: "Dashboard"
+  subtitle: "Current month"
+  income: "Income"
+  expenses: "Expenses"
+  net: "Net"
+  savingsRate: "Savings rate"
+  topCategories: "Top categories"
+  noData: "No expense data yet."
+
+transactions:
+  title: "Transactions"
+  subtitle: "Financial events"
+  empty: "No transactions yet. Add your first one from chat."
+
+reports:
+  title: "Reports"
+  subtitle: "Cash flow, categories and AI summaries."
+
+goals:
+  title: "Goals"
+  subtitle: "Savings goals and business targets."
+
+settings:
+  title: "Settings"
+  subtitle: "Workspace, accounts, categories and preferences."
