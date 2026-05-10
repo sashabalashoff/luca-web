@@ -2,32 +2,24 @@
 
 import { apiFetch } from "@/shared/api/client";
 import { useI18n } from "@/shared/i18n/i18n-provider";
-import { Button } from "@/shared/ui/button";
-import { Card } from "@/shared/ui/card";
-import {
-  ArrowUpRight,
-  CheckCircle,
-  PaperPlaneTilt,
-  Sparkle,
-  Wallet
-} from "@phosphor-icons/react/dist/ssr";
-import { useMemo, useState } from "react";
-import { useLucaBootstrap } from "../hooks/use-luca-bootstrap";
+import { AppIcons } from "@/shared/icons/app-icons";
+import { useLuca } from "@/shared/providers/luca-provider";
+import { CheckIcon, PaperPlaneTiltIcon, SparkleIcon } from "@phosphor-icons/react/dist/ssr";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+type TxIntent = {
+  type: "INCOME" | "EXPENSE" | "TRANSFER";
+  amount: number;
+  currency: string;
+  categoryName?: string | null;
+  merchant?: string | null;
+  comment?: string | null;
+  confidence: number;
+};
 
 type AiAction = {
   id: string;
-  payloadJson: {
-    transactions: Array<{
-      type: "INCOME" | "EXPENSE" | "TRANSFER";
-      amount: number;
-      currency: string;
-      categoryName?: string | null;
-      merchant?: string | null;
-      counterparty?: string | null;
-      comment?: string | null;
-      confidence: number;
-    }>;
-  };
+  payloadJson: { transactions: TxIntent[] };
 };
 
 type Message = {
@@ -35,59 +27,48 @@ type Message = {
   role: "user" | "assistant";
   content: string;
   action?: AiAction | null;
+  confirmed?: boolean;
 };
 
 export function ChatPageClient() {
   const { t, locale } = useI18n();
-  const { workspace, defaultAccount, isLoading } = useLucaBootstrap();
+  const { workspace, defaultAccount, isLoading } = useLuca();
 
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
-
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "intro",
       role: "assistant",
-      content:
-        locale === "ru"
-          ? "Расскажи мне, что произошло с деньгами. Например: «Потратил $52 в Nobu вчера» или «Получил $1200 от клиента Alex»."
-          : "Tell me what happened with your money. For example: “Spent $52 at Nobu yesterday” or “Got $1200 from client Alex”."
+      content: t("chat.intro")
     }
   ]);
+
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isSending]);
 
   const prompts = useMemo(
     () =>
       locale === "ru"
-        ? [
-          "Потратил $52 в Nobu вчера",
-          "Получил $1200 от клиента Alex",
-          "Потратил 300 на рекламу",
-          "Потратил 20 на такси"
-        ]
-        : [
-          "Spent $52 at Nobu yesterday",
-          "Got $1200 from client Alex",
-          "Paid 300 for ads",
-          "Spent 20 on taxi"
-        ],
+        ? ["Потратил $52 в Nobu вчера", "Получил $1200 от клиента Alex", "Потратил 300 на рекламу", "Такси 20 баксов"]
+        : ["Spent $52 at Nobu yesterday", "Got $1200 from client Alex", "Paid $300 for ads", "Taxi $20"],
     [locale]
   );
 
-  async function sendMessage() {
-    if (!input.trim() || !workspace) return;
+  async function sendMessage(text?: string) {
+    const msg = (text ?? input).trim();
+    if (!msg || !workspace) return;
 
-    const text = input.trim();
     setInput("");
     setIsSending(true);
 
     setMessages((prev) => [
       ...prev,
-      {
-        id: crypto.randomUUID(),
-        role: "user",
-        content: text
-      }
+      { id: crypto.randomUUID(), role: "user", content: msg }
     ]);
 
     try {
@@ -97,15 +78,10 @@ export function ChatPageClient() {
         action: AiAction | null;
       }>("/api/ai/chat", {
         method: "POST",
-        body: JSON.stringify({
-          workspaceId: workspace.id,
-          sessionId,
-          message: text
-        })
+        body: JSON.stringify({ workspaceId: workspace.id, sessionId, message: msg })
       });
 
       setSessionId(result.sessionId);
-
       setMessages((prev) => [
         ...prev,
         {
@@ -115,18 +91,15 @@ export function ChatPageClient() {
           action: result.action
         }
       ]);
-    } catch (error) {
-      console.error(error);
-
+    } catch {
       setMessages((prev) => [
         ...prev,
         {
           id: crypto.randomUUID(),
           role: "assistant",
-          content:
-            locale === "ru"
-              ? "Что-то пошло не так. Проверь, что API запущен на 3001."
-              : "Something went wrong. Check that API is running on port 3001."
+          content: locale === "ru"
+            ? "Что-то пошло не так. Проверь, что API запущен на 3001."
+            : "Something went wrong. Make sure the API is running on port 3001."
         }
       ]);
     } finally {
@@ -136,179 +109,178 @@ export function ChatPageClient() {
 
   async function confirmAction(actionId: string) {
     if (!defaultAccount) return;
-
     await apiFetch(`/api/ai/actions/${actionId}/confirm`, {
       method: "POST",
-      body: JSON.stringify({
-        accountId: defaultAccount.id
-      })
+      body: JSON.stringify({ accountId: defaultAccount.id })
     });
-
     setMessages((prev) =>
-      prev.map((message) =>
-        message.action?.id === actionId
-          ? {
-            ...message,
-            content: t("chat.saved"),
-            action: null
-          }
-          : message
+      prev.map((m) =>
+        m.action?.id === actionId
+          ? { ...m, content: t("chat.saved"), action: null, confirmed: true }
+          : m
       )
     );
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[1fr_370px]">
-      <section className="min-h-[calc(100vh-128px)] overflow-hidden rounded-[34px] border border-[rgb(var(--border))] bg-[rgb(var(--surface))]/70 shadow-[0_30px_120px_rgba(0,0,0,0.22)] backdrop-blur-2xl">
-        <header className="flex items-start justify-between border-b border-[rgb(var(--border))] p-6">
-          <div>
-            <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 py-1.5 text-xs text-[rgb(var(--muted))]">
-              <Sparkle size={14} weight="duotone" />
-              AI command center
-            </div>
+    <div className="mx-auto flex h-[calc(100vh-var(--header-height)-48px)] max-w-3xl flex-col gap-0">
+      <div className="mb-4 flex items-center gap-2">
+        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[rgb(var(--accent-dim))]">
+          <SparkleIcon size={14} weight="fill" className="text-[rgb(var(--accent))]" />
+        </div>
+        <h1 className="text-base font-semibold">{t("chat.title")}</h1>
+      </div>
 
-            <h1 className="text-4xl font-semibold tracking-[-0.055em]">
-              {t("chat.title")}
-            </h1>
+      <div className="flex flex-1 flex-col overflow-hidden rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
+        <div className="flex-1 space-y-3 overflow-y-auto p-4 no-scrollbar">
+          {messages.map((message) => (
+            <div
+              key={message.id}
+              className={["flex gap-3", message.role === "user" ? "justify-end" : "justify-start"].join(" ")}
+            >
+              {message.role === "assistant" && (
+                <div className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[rgb(var(--accent-dim))] text-[rgb(var(--accent))]">
+                  <SparkleIcon size={12} weight="fill" />
+                </div>
+              )}
 
-            <p className="mt-2 text-[rgb(var(--muted))]">{t("chat.subtitle")}</p>
-          </div>
-        </header>
-
-        <div className="flex h-[calc(100vh-340px)] min-h-[420px] flex-col">
-          <div className="flex-1 space-y-4 overflow-y-auto p-5">
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={[
-                  "flex",
-                  message.role === "user" ? "justify-end" : "justify-start"
-                ].join(" ")}
-              >
+              <div className={["max-w-[78%]", message.role === "user" ? "items-end" : "items-start", "flex flex-col gap-2"].join(" ")}>
                 <div
                   className={[
-                    "max-w-[82%] rounded-[28px] px-5 py-4 text-sm leading-6",
+                    "rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
                     message.role === "user"
-                      ? "bg-[rgb(var(--foreground))] text-[rgb(var(--background))]"
-                      : "border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] text-[rgb(var(--foreground))]"
+                      ? "bg-[rgb(var(--foreground))] text-[rgb(var(--background))] rounded-br-sm"
+                      : "bg-[rgb(var(--surface-soft))] text-[rgb(var(--foreground))] rounded-bl-sm"
                   ].join(" ")}
                 >
-                  <p className="whitespace-pre-wrap">{message.content}</p>
-
-                  {message.action && (
-                    <div className="mt-4 space-y-3">
-                      {message.action.payloadJson.transactions.map((tx, index) => (
-                        <div
-                          key={index}
-                          className="rounded-[24px] border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-4"
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="font-mono text-xs uppercase tracking-[0.18em] text-[rgb(var(--muted))]">
-                              {tx.type}
-                            </div>
-                            <div className="text-xs text-[rgb(var(--muted))]">
-                              {Math.round(tx.confidence * 100)}%
-                            </div>
-                          </div>
-
-                          <div className="mt-3 text-3xl font-semibold tracking-[-0.04em]">
-                            {tx.type === "EXPENSE" ? "-" : "+"}
-                            {tx.amount} {tx.currency}
-                          </div>
-
-                          <div className="mt-2 text-sm text-[rgb(var(--muted))]">
-                            {tx.categoryName ?? "Uncategorized"}
-                            {tx.merchant ? ` · ${tx.merchant}` : ""}
-                          </div>
-                        </div>
-                      ))}
-
-                      <Button
-                        onClick={() => confirmAction(message.action!.id)}
-                        className="gap-2"
-                      >
-                        <CheckCircle size={18} weight="fill" />
-                        {t("chat.confirmAndSave")}
-                      </Button>
-                    </div>
+                  {message.confirmed && (
+                    <span className="mr-1.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-[rgb(var(--positive))] text-white">
+                      <CheckIcon size={10} weight="bold" />
+                    </span>
                   )}
+                  {message.content}
                 </div>
+
+                {message.action && (
+                  <div className="w-full space-y-2">
+                    {message.action.payloadJson.transactions.map((tx, i) => (
+                      <TxCard key={i} tx={tx} />
+                    ))}
+                    <button
+                      onClick={() => confirmAction(message.action!.id)}
+                      className="flex h-9 items-center gap-2 rounded-xl bg-[rgb(var(--foreground))] px-4 text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85 active:scale-[0.98]"
+                    >
+                      <CheckIcon size={14} weight="bold" />
+                      {t("chat.confirmAndSave")}
+                    </button>
+                  </div>
+                )}
               </div>
-            ))}
-
-            {isSending && (
-              <div className="max-w-[280px] rounded-[28px] border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-5 py-4 text-sm text-[rgb(var(--muted))]">
-                {t("chat.thinking")}
-              </div>
-            )}
-          </div>
-
-          <div className="border-t border-[rgb(var(--border))] p-4">
-            <div className="flex gap-3 rounded-[28px] border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] p-2">
-              <textarea
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    sendMessage();
-                  }
-                }}
-                placeholder={t("chat.placeholder")}
-                className="min-h-12 flex-1 resize-none bg-transparent px-3 py-3 text-sm outline-none placeholder:text-[rgb(var(--muted))]"
-              />
-
-              <button
-                onClick={sendMessage}
-                disabled={isSending || !input.trim() || isLoading}
-                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[20px] bg-[rgb(var(--foreground))] text-[rgb(var(--background))] transition hover:opacity-90 disabled:opacity-40"
-              >
-                <PaperPlaneTilt size={19} weight="fill" />
-              </button>
             </div>
+          ))}
+
+          {isSending && (
+            <div className="flex gap-3">
+              <div className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[rgb(var(--accent-dim))] text-[rgb(var(--accent))]">
+                <SparkleIcon size={12} weight="fill" />
+              </div>
+              <div className="rounded-2xl rounded-bl-sm bg-[rgb(var(--surface-soft))] px-4 py-2.5 text-sm text-[rgb(var(--muted))]">
+                <ThinkingDots />
+              </div>
+            </div>
+          )}
+
+          <div ref={bottomRef} />
+        </div>
+
+        <div className="border-t border-[rgb(var(--border))] px-3 py-3">
+          {!messages.some((m) => m.role === "user") && (
+            <div className="mb-3 flex flex-wrap gap-2">
+              {prompts.map((p) => (
+                <button
+                  key={p}
+                  onClick={() => sendMessage(p)}
+                  className="rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 py-1.5 text-xs text-[rgb(var(--muted))] transition hover:border-[rgb(var(--accent)/0.4)] hover:text-[rgb(var(--foreground))]"
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="flex items-end gap-2">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  sendMessage();
+                }
+              }}
+              placeholder={t("chat.placeholder")}
+              rows={1}
+              className="min-h-9 flex-1 resize-none rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 py-2 text-sm outline-none transition placeholder:text-[rgb(var(--muted))] focus:border-[rgb(var(--accent))] focus:ring-1 focus:ring-[rgb(var(--accent)/0.2)]"
+            />
+            <button
+              onClick={() => sendMessage()}
+              disabled={isSending || !input.trim() || isLoading}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[rgb(var(--foreground))] text-[rgb(var(--background))] transition hover:opacity-85 disabled:opacity-35 active:scale-95"
+            >
+              <PaperPlaneTiltIcon size={15} weight="fill" />
+            </button>
           </div>
         </div>
-      </section>
+      </div>
 
-      <aside className="space-y-4">
-        <Card className="p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm text-[rgb(var(--muted))]">
-                Default account
-              </div>
-              <div className="mt-2 text-2xl font-semibold tracking-[-0.04em]">
-                {defaultAccount?.name ?? t("common.loading")}
-              </div>
-            </div>
-
-            <div className="flex h-12 w-12 items-center justify-center rounded-[22px] bg-[rgb(var(--surface-soft))]">
-              <Wallet size={22} weight="duotone" />
-            </div>
-          </div>
-        </Card>
-
-        <Card className="p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <div className="text-sm text-[rgb(var(--muted))]">
-              {t("chat.tryPrompts")}
-            </div>
-            <ArrowUpRight size={16} weight="bold" />
-          </div>
-
-          <div className="space-y-2">
-            {prompts.map((prompt) => (
-              <button
-                key={prompt}
-                onClick={() => setInput(prompt)}
-                className="w-full rounded-[22px] border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-4 py-3 text-left text-sm transition hover:border-[rgb(var(--foreground))]"
-              >
-                {prompt}
-              </button>
-            ))}
-          </div>
-        </Card>
-      </aside>
+      <div className="mt-3 flex items-center gap-3">
+        <div className="flex items-center gap-2 text-xs text-[rgb(var(--muted))]">
+          <AppIcons.wallet size={13} weight="duotone" />
+          {defaultAccount
+            ? `${defaultAccount.name} · ${defaultAccount.currency} ${Number(defaultAccount.currentBalance).toLocaleString()}`
+            : t("common.loading")}
+        </div>
+      </div>
     </div>
+  );
+}
+
+function TxCard({ tx }: { tx: TxIntent }) {
+  const isExpense = tx.type === "EXPENSE";
+  return (
+    <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <div className="text-xs font-medium uppercase tracking-wide text-[rgb(var(--muted))]">
+            {tx.type}
+          </div>
+          <div className={["mt-1 text-xl font-semibold tracking-tight", isExpense ? "text-[rgb(var(--negative))]" : "text-[rgb(var(--positive))]"].join(" ")}>
+            {isExpense ? "−" : "+"}{tx.amount} {tx.currency}
+          </div>
+          {(tx.categoryName || tx.merchant) && (
+            <div className="mt-1 text-xs text-[rgb(var(--muted))]">
+              {[tx.categoryName, tx.merchant].filter(Boolean).join(" · ")}
+            </div>
+          )}
+        </div>
+        <div className="rounded-md bg-[rgb(var(--surface-soft))] px-2 py-0.5 text-xs text-[rgb(var(--muted))]">
+          {Math.round(tx.confidence * 100)}%
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ThinkingDots() {
+  return (
+    <span className="inline-flex gap-1">
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-current"
+          style={{ animationDelay: `${i * 150}ms` }}
+        />
+      ))}
+    </span>
   );
 }

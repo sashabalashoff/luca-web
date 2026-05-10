@@ -2,31 +2,149 @@
 
 import { useI18n } from "@/shared/i18n/i18n-provider";
 import { AppIcons } from "@/shared/icons/app-icons";
+import { createSupabaseBrowserClient } from "@/shared/lib/supabase/client";
+import { LucaProvider, useLuca } from "@/shared/providers/luca-provider";
 import { LanguageSwitcher } from "@/shared/ui/language-switcher";
 import { ThemeSwitcher } from "@/shared/ui/theme-switcher";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 const nav = [
-  { href: "/app", labelKey: "navigation.chat", icon: AppIcons.chat },
-  {
-    href: "/app/transactions",
-    labelKey: "navigation.transactions",
-    icon: AppIcons.transactions
-  },
-  {
-    href: "/app/dashboard",
-    labelKey: "navigation.dashboard",
-    icon: AppIcons.dashboard
-  },
-  { href: "/app/reports", labelKey: "navigation.reports", icon: AppIcons.reports },
-  { href: "/app/goals", labelKey: "navigation.goals", icon: AppIcons.goals },
-  {
-    href: "/app/settings",
-    labelKey: "navigation.settings",
-    icon: AppIcons.settings
-  }
+  { href: "/app",               labelKey: "navigation.chat",         icon: AppIcons.chat },
+  { href: "/app/dashboard",     labelKey: "navigation.dashboard",    icon: AppIcons.dashboard },
+  { href: "/app/transactions",  labelKey: "navigation.transactions", icon: AppIcons.transactions },
+  { href: "/app/reports",       labelKey: "navigation.reports",      icon: AppIcons.reports },
+  { href: "/app/goals",         labelKey: "navigation.goals",        icon: AppIcons.goals },
+  { href: "/app/settings",      labelKey: "navigation.settings",     icon: AppIcons.settings }
 ];
+
+function usePageTitle(locale: string): string {
+  const pathname = usePathname();
+  const { t } = useI18n();
+  const found = nav.findLast((item) => {
+    const href = `/${locale}${item.href}`;
+    return item.href === "/app" ? pathname === href : pathname.startsWith(href);
+  });
+  return found ? t(found.labelKey) : "LUCA";
+}
+
+function SidebarFooter({ locale }: { locale: string }) {
+  const { workspace } = useLuca();
+  const [email, setEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    createSupabaseBrowserClient()
+      .auth.getUser()
+      .then(({ data }) => setEmail(data.user?.email ?? null));
+  }, []);
+
+  const initial = email?.[0]?.toUpperCase() ?? workspace?.name?.[0]?.toUpperCase() ?? "?";
+
+  return (
+    <div className="shrink-0 border-t border-[rgb(var(--border-soft))] p-3">
+      <Link
+        href={`/${locale}/app/settings`}
+        className="flex items-center gap-2.5 rounded-lg px-2 py-2 transition-colors hover:bg-[rgb(var(--surface-soft))]"
+      >
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[rgb(var(--accent-dim))] text-xs font-semibold text-[rgb(var(--accent))]">
+          {initial}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-xs font-medium text-[rgb(var(--foreground))]">
+            {workspace?.name ?? "…"}
+          </div>
+          <div className="truncate text-xs text-[rgb(var(--muted))]">
+            {email ?? "…"}
+          </div>
+        </div>
+      </Link>
+    </div>
+  );
+}
+
+function Sidebar({ locale }: { locale: string }) {
+  const pathname = usePathname();
+  const { t } = useI18n();
+
+  return (
+    <aside className="fixed inset-y-0 left-0 z-30 hidden w-[var(--sidebar-width)] flex-col border-r border-[rgb(var(--border))] bg-[rgb(var(--surface))] lg:flex">
+      {/* Brand */}
+      <div className="flex h-[var(--header-height)] shrink-0 items-center border-b border-[rgb(var(--border-soft))] px-4">
+        <Link href={`/${locale}/app`} className="flex items-center gap-2">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[rgb(var(--accent))]">
+            <AppIcons.sparkle size={14} weight="fill" className="text-white" />
+          </div>
+          <span className="text-sm font-semibold tracking-tight text-[rgb(var(--foreground))]">
+            LUCA
+          </span>
+        </Link>
+      </div>
+
+      {/* Nav */}
+      <nav className="flex-1 overflow-y-auto px-2 py-3">
+        {nav.map((item) => {
+          const Icon = item.icon;
+          const href = `/${locale}${item.href}`;
+          const isActive =
+            item.href === "/app"
+              ? pathname === href
+              : pathname.startsWith(href);
+
+          return (
+            <Link
+              key={item.href}
+              href={href}
+              className={[
+                "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors mb-0.5",
+                isActive
+                  ? "bg-[rgb(var(--accent-dim))] text-[rgb(var(--accent))] font-medium"
+                  : "text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
+              ].join(" ")}
+            >
+              <Icon
+                size={16}
+                weight={isActive ? "fill" : "regular"}
+              />
+              {t(item.labelKey)}
+            </Link>
+          );
+        })}
+      </nav>
+
+      <SidebarFooter locale={locale} />
+    </aside>
+  );
+}
+
+function Header({ locale }: { locale: string }) {
+  const pageTitle = usePageTitle(locale);
+
+  return (
+    <header className="sticky top-0 z-20 flex h-[var(--header-height)] shrink-0 items-center justify-between border-b border-[rgb(var(--border))] bg-[rgb(var(--background))]/90 px-4 backdrop-blur-sm lg:px-6">
+      <div className="flex items-center gap-3">
+        {/* Mobile brand */}
+        <Link
+          href={`/${locale}/app`}
+          className="flex items-center gap-2 lg:hidden"
+        >
+          <div className="flex h-6 w-6 items-center justify-center rounded-md bg-[rgb(var(--accent))]">
+            <AppIcons.sparkle size={12} weight="fill" className="text-white" />
+          </div>
+        </Link>
+        {/* Page title */}
+        <span className="text-sm font-semibold text-[rgb(var(--foreground))]">
+          {pageTitle}
+        </span>
+      </div>
+
+      <div className="flex items-center gap-1.5">
+        <LanguageSwitcher />
+        <ThemeSwitcher />
+      </div>
+    </header>
+  );
+}
 
 export function AppShell({
   locale,
@@ -35,76 +153,15 @@ export function AppShell({
   locale: string;
   children: React.ReactNode;
 }) {
-  const pathname = usePathname();
-  const { t } = useI18n();
-
   return (
-    <main className="luca-bg min-h-screen">
-      <aside className="fixed left-0 top-0 hidden h-screen w-[292px] border-r border-[rgb(var(--border))] bg-[rgb(var(--surface))]/70 backdrop-blur-2xl lg:block">
-        <div className="flex h-24 items-center px-6">
-          <Link href={`/${locale}/app`}>
-            <div className="font-mono text-2xl font-semibold tracking-[-0.05em]">
-              LUCA
-            </div>
-            <div className="mt-1 text-xs text-[rgb(var(--muted))]">
-              AI financial core
-            </div>
-          </Link>
+    <LucaProvider>
+      <div className="luca-app">
+        <Sidebar locale={locale} />
+        <div className="flex min-h-dvh flex-1 flex-col lg:pl-[var(--sidebar-width)]">
+          <Header locale={locale} />
+          <main className="flex-1 px-4 py-6 lg:px-8">{children}</main>
         </div>
-
-        <nav className="px-3">
-          {nav.map((item) => {
-            const Icon = item.icon;
-            const href = `/${locale}${item.href}`;
-            const isActive =
-              pathname === href ||
-              (item.href !== "/app" && pathname.startsWith(href));
-
-            return (
-              <Link
-                key={item.href}
-                href={href}
-                className={[
-                  "mb-1 flex items-center gap-3 rounded-[22px] px-4 py-3 text-sm transition",
-                  isActive
-                    ? "bg-[rgb(var(--foreground))] text-[rgb(var(--background))]"
-                    : "text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
-                ].join(" ")}
-              >
-                <Icon size={20} weight={isActive ? "fill" : "duotone"} />
-                {t(item.labelKey)}
-              </Link>
-            );
-          })}
-        </nav>
-
-        <div className="absolute bottom-5 left-0 right-0 px-5">
-          <div className="rounded-[28px] border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] p-4">
-            <div className="text-sm font-medium">MVP Build</div>
-            <div className="mt-1 text-xs leading-5 text-[rgb(var(--muted))]">
-              AI chat → transaction core → reports.
-            </div>
-          </div>
-        </div>
-      </aside>
-
-      <section className="min-h-screen lg:pl-[292px]">
-        <header className="sticky top-0 z-20 flex h-20 items-center justify-between border-b border-[rgb(var(--border))] bg-[rgb(var(--background))]/75 px-5 backdrop-blur-2xl lg:px-8">
-          <div>
-            <div className="font-mono text-xs uppercase tracking-[0.26em] text-[rgb(var(--muted))]">
-              workspace
-            </div>
-            <div className="mt-1 text-sm font-medium">Personal</div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <LanguageSwitcher />
-            <ThemeSwitcher />
-          </div>
-        </header>
-
-        <div className="mx-auto max-w-7xl px-5 py-6 lg:px-8">{children}</div>
-      </section>
-    </main>
+      </div>
+    </LucaProvider>
   );
 }

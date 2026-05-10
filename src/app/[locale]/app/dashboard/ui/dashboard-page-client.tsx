@@ -2,111 +2,164 @@
 
 import { apiFetch } from "@/shared/api/client";
 import { useI18n } from "@/shared/i18n/i18n-provider";
-import { Card } from "@/shared/ui/card";
-import { ChartPieSlice } from "@phosphor-icons/react/dist/ssr";
+import { useLuca } from "@/shared/providers/luca-provider";
+import { ArrowDownRightIcon, ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr";
 import { useEffect, useState } from "react";
-import { useLucaBootstrap } from "../../hooks/use-luca-bootstrap";
 
 type Summary = {
   income: number;
   expenses: number;
   net: number;
   savingsRate: number;
-  categoryBreakdown: Array<{
-    name: string;
-    amount: number;
-  }>;
+  categoryBreakdown: Array<{ name: string; amount: number }>;
 };
+
+function fmt(n: number) {
+  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 
 export function DashboardPageClient() {
   const { t } = useI18n();
-  const { workspace } = useLucaBootstrap();
+  const { workspace } = useLuca();
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!workspace) return;
-
+    setLoading(true);
     apiFetch<Summary>(`/api/reports/monthly-summary?workspaceId=${workspace.id}`)
       .then(setSummary)
-      .catch(console.error);
+      .catch(console.error)
+      .finally(() => setLoading(false));
   }, [workspace]);
 
-  const stats = [
-    [t("dashboard.income"), summary?.income ?? 0],
-    [t("dashboard.expenses"), summary?.expenses ?? 0],
-    [t("dashboard.net"), summary?.net ?? 0],
-    [t("dashboard.savingsRate"), `${(summary?.savingsRate ?? 0).toFixed(1)}%`]
-  ];
+  const currency = workspace?.baseCurrency ?? "USD";
+  const maxCategory = Math.max(...(summary?.categoryBreakdown ?? []).map((c) => c.amount), 1);
 
   return (
-    <div>
-      <div className="mb-6">
-        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-1.5 text-xs text-[rgb(var(--muted))]">
-          <ChartPieSlice size={14} weight="duotone" />
-          {t("dashboard.subtitle")}
-        </div>
-
-        <h1 className="text-4xl font-semibold tracking-[-0.055em]">
-          {t("dashboard.title")}
-        </h1>
+    <div className="max-w-4xl space-y-6">
+      {/* Stat grid */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatCard
+          label={t("dashboard.income")}
+          value={loading ? null : `${currency} ${fmt(summary?.income ?? 0)}`}
+          trend="up"
+          color="positive"
+        />
+        <StatCard
+          label={t("dashboard.expenses")}
+          value={loading ? null : `${currency} ${fmt(summary?.expenses ?? 0)}`}
+          trend="down"
+          color="negative"
+        />
+        <StatCard
+          label={t("dashboard.net")}
+          value={loading ? null : `${currency} ${fmt(summary?.net ?? 0)}`}
+          color={summary && summary.net >= 0 ? "positive" : "negative"}
+        />
+        <StatCard
+          label={t("dashboard.savingsRate")}
+          value={loading ? null : `${(summary?.savingsRate ?? 0).toFixed(1)}%`}
+          color="accent"
+        />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
-        {stats.map(([label, value]) => (
-          <Card key={label.toString()} className="p-5">
-            <div className="text-sm text-[rgb(var(--muted))]">{label}</div>
-            <div className="mt-4 text-3xl font-semibold tracking-[-0.055em]">
-              {typeof value === "number" ? value.toFixed(2) : value}
-            </div>
-          </Card>
-        ))}
-      </div>
-
-      <Card className="mt-5 p-5">
-        <div className="mb-5 flex items-center justify-between">
-          <div>
-            <div className="text-xl font-semibold tracking-[-0.04em]">
-              {t("dashboard.topCategories")}
-            </div>
-            <div className="mt-1 text-sm text-[rgb(var(--muted))]">
-              Expense breakdown
-            </div>
-          </div>
+      {/* Category breakdown */}
+      <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
+        <div className="border-b border-[rgb(var(--border-soft))] px-5 py-3.5">
+          <span className="text-sm font-medium">{t("dashboard.topCategories")}</span>
         </div>
 
-        <div className="space-y-4">
-          {(summary?.categoryBreakdown ?? []).map((item) => {
-            const width = Math.min(
-              100,
-              (item.amount / Math.max(summary?.expenses ?? 1, 1)) * 100
-            );
-
-            return (
-              <div key={item.name}>
-                <div className="mb-2 flex justify-between text-sm">
-                  <span>{item.name}</span>
-                  <span className="text-[rgb(var(--muted))]">
-                    {item.amount.toFixed(2)}
-                  </span>
+        <div className="p-5">
+          {loading ? (
+            <div className="space-y-4">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="space-y-1.5">
+                  <div className="h-4 w-32 animate-pulse rounded bg-[rgb(var(--surface-soft))]" />
+                  <div className="h-2 animate-pulse rounded-full bg-[rgb(var(--surface-soft))]" />
                 </div>
+              ))}
+            </div>
+          ) : !summary?.categoryBreakdown?.length ? (
+            <div className="flex flex-col items-center py-10 text-center">
+              <div className="mb-2 text-3xl opacity-20">📊</div>
+              <p className="text-sm text-[rgb(var(--muted))]">{t("dashboard.noData")}</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {summary.categoryBreakdown.map((item) => {
+                const pct = Math.round((item.amount / maxCategory) * 100);
+                const totalExpenses = summary.expenses || 1;
+                const share = Math.round((item.amount / totalExpenses) * 100);
 
-                <div className="h-2 overflow-hidden rounded-full bg-[rgb(var(--surface-soft))]">
-                  <div
-                    className="h-full rounded-full bg-[rgb(var(--foreground))]"
-                    style={{ width: `${width}%` }}
-                  />
-                </div>
-              </div>
-            );
-          })}
-
-          {!summary?.categoryBreakdown?.length && (
-            <div className="py-6 text-sm text-[rgb(var(--muted))]">
-              No expense data yet.
+                return (
+                  <div key={item.name}>
+                    <div className="mb-1.5 flex items-center justify-between text-sm">
+                      <span className="font-medium">{item.name}</span>
+                      <div className="flex items-center gap-3 tabular-nums">
+                        <span className="text-xs text-[rgb(var(--muted))]">{share}%</span>
+                        <span className="font-medium text-[rgb(var(--negative))]">
+                          {currency} {fmt(item.amount)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-[rgb(var(--surface-soft))]">
+                      <div
+                        className="h-full rounded-full bg-[rgb(var(--negative))] opacity-70 transition-all duration-500"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
-      </Card>
+      </div>
+    </div>
+  );
+}
+
+type StatColor = "positive" | "negative" | "accent" | "default";
+
+function StatCard({
+  label,
+  value,
+  trend,
+  color = "default"
+}: {
+  label: string;
+  value: string | null;
+  trend?: "up" | "down";
+  color?: StatColor;
+}) {
+  const valueColor = {
+    positive: "text-[rgb(var(--positive))]",
+    negative: "text-[rgb(var(--negative))]",
+    accent: "text-[rgb(var(--accent))]",
+    default: "text-[rgb(var(--foreground))]"
+  }[color];
+
+  return (
+    <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-4">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-medium uppercase tracking-widest text-[rgb(var(--muted))]">
+          {label}
+        </span>
+        {trend === "up" && (
+          <ArrowUpRightIcon size={13} className="text-[rgb(var(--positive))]" />
+        )}
+        {trend === "down" && (
+          <ArrowDownRightIcon size={13} className="text-[rgb(var(--negative))]" />
+        )}
+      </div>
+      {value === null ? (
+        <div className="h-7 w-24 animate-pulse rounded bg-[rgb(var(--surface-soft))]" />
+      ) : (
+        <div className={["text-xl font-semibold tracking-tight tabular-nums", valueColor].join(" ")}>
+          {value}
+        </div>
+      )}
     </div>
   );
 }
