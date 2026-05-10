@@ -46,39 +46,35 @@ export function ReportsPageClient() {
 
   return (
     <div className="max-w-2xl space-y-5">
-      {/* Period header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">{t("reports.title")}</h1>
-          <p className="mt-0.5 text-sm text-[rgb(var(--muted))]">{monthLabel}</p>
-        </div>
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight">{t("reports.title")}</h1>
+        <p className="mt-0.5 text-sm text-[rgb(var(--muted))]">{monthLabel}</p>
       </div>
 
-      {/* Income vs Expenses comparison */}
-      <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
-        <div className="border-b border-[rgb(var(--border-soft))] px-5 py-3.5">
-          <span className="text-sm font-medium">{t("reports.overview")}</span>
+      {/* Income vs Expenses */}
+      <div className="overflow-hidden rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
+        <div className="border-b border-[rgb(var(--border-soft))] px-5 py-4">
+          <span className="text-sm font-semibold">{t("reports.overview")}</span>
         </div>
         <div className="p-5">
           {loading ? (
             <div className="space-y-4">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="h-8 animate-pulse rounded bg-[rgb(var(--surface-soft))]" />
+                <div key={i} className="h-8 animate-pulse rounded-lg bg-[rgb(var(--surface-soft))]" />
               ))}
             </div>
           ) : (
-            <div className="space-y-4">
-              {/* Income bar */}
+            <div className="space-y-5">
               <div>
-                <div className="mb-1.5 flex items-center justify-between text-sm">
-                  <span className="text-[rgb(var(--positive))] font-medium">{t("reports.income")}</span>
+                <div className="mb-2 flex items-center justify-between text-sm">
+                  <span className="font-medium text-[rgb(var(--positive))]">{t("reports.income")}</span>
                   <span className="font-semibold tabular-nums text-[rgb(var(--positive))]">
-                    + {currency} {fmt(summary?.income ?? 0)}
+                    +{currency} {fmt(summary?.income ?? 0)}
                   </span>
                 </div>
-                <div className="h-2.5 overflow-hidden rounded-full bg-[rgb(var(--surface-soft))]">
+                <div className="h-1.5 overflow-hidden rounded-full bg-[rgb(var(--surface-soft))]">
                   <div
-                    className="h-full rounded-full bg-[rgb(var(--positive))] opacity-80 transition-all duration-500"
+                    className="h-full rounded-full bg-[rgb(var(--positive))] transition-all duration-700"
                     style={{
                       width: `${summary && summary.income > 0
                         ? Math.min(100, Math.round((summary.income / Math.max(summary.income, summary.expenses)) * 100))
@@ -88,17 +84,16 @@ export function ReportsPageClient() {
                 </div>
               </div>
 
-              {/* Expenses bar */}
               <div>
-                <div className="mb-1.5 flex items-center justify-between text-sm">
-                  <span className="text-[rgb(var(--negative))] font-medium">{t("reports.expenses")}</span>
+                <div className="mb-2 flex items-center justify-between text-sm">
+                  <span className="font-medium text-[rgb(var(--negative))]">{t("reports.expenses")}</span>
                   <span className="font-semibold tabular-nums text-[rgb(var(--negative))]">
-                    − {currency} {fmt(summary?.expenses ?? 0)}
+                    −{currency} {fmt(summary?.expenses ?? 0)}
                   </span>
                 </div>
-                <div className="h-2.5 overflow-hidden rounded-full bg-[rgb(var(--surface-soft))]">
+                <div className="h-1.5 overflow-hidden rounded-full bg-[rgb(var(--surface-soft))]">
                   <div
-                    className="h-full rounded-full bg-[rgb(var(--negative))] opacity-80 transition-all duration-500"
+                    className="h-full rounded-full bg-[rgb(var(--negative))] transition-all duration-700"
                     style={{
                       width: `${summary && summary.expenses > 0
                         ? Math.min(100, Math.round((summary.expenses / Math.max(summary.income, summary.expenses)) * 100))
@@ -108,8 +103,7 @@ export function ReportsPageClient() {
                 </div>
               </div>
 
-              {/* Net */}
-              <div className="mt-2 flex items-center justify-between rounded-lg bg-[rgb(var(--surface-soft))] px-4 py-3">
+              <div className="flex items-center justify-between rounded-xl bg-[rgb(var(--surface-soft))] px-4 py-3">
                 <span className="text-sm font-medium">{t("reports.net")}</span>
                 <span
                   className={[
@@ -124,8 +118,7 @@ export function ReportsPageClient() {
                 </span>
               </div>
 
-              {/* Savings rate */}
-              <div className="flex items-center justify-between px-1">
+              <div className="flex items-center justify-between">
                 <span className="text-sm text-[rgb(var(--muted))]">{t("reports.savingsRate")}</span>
                 <span className="text-sm font-semibold tabular-nums text-[rgb(var(--accent))]">
                   {(summary?.savingsRate ?? 0).toFixed(1)}%
@@ -136,19 +129,16 @@ export function ReportsPageClient() {
         </div>
       </div>
 
-      {/* Category table */}
-      <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
-        <div className="border-b border-[rgb(var(--border-soft))] px-5 py-3.5">
-          <span className="text-sm font-medium">{t("reports.byCategory")}</span>
+      {/* Category breakdown */}
+      <div className="overflow-hidden rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
+        <div className="border-b border-[rgb(var(--border-soft))] px-5 py-4">
+          <span className="text-sm font-semibold">{t("reports.byCategory")}</span>
         </div>
 
         {loading ? (
           <div className="space-y-px">
             {[1, 2, 3, 4].map((i) => (
-              <div
-                key={i}
-                className="h-12 animate-pulse bg-[rgb(var(--surface-soft))]"
-              />
+              <div key={i} className="h-12 animate-pulse bg-[rgb(var(--surface-soft))]" />
             ))}
           </div>
         ) : !summary?.categoryBreakdown?.length ? (
@@ -166,15 +156,15 @@ export function ReportsPageClient() {
                 <div
                   key={item.name}
                   className={[
-                    "flex items-center gap-4 px-5 py-3",
+                    "flex items-center gap-4 px-5 py-3.5",
                     !isLast ? "border-b border-[rgb(var(--border-soft))]" : ""
                   ].join(" ")}
                 >
-                  <div className="w-6 text-right text-xs font-medium text-[rgb(var(--muted))]">
+                  <div className="w-5 text-right text-xs tabular-nums text-[rgb(var(--muted-soft))]">
                     {idx + 1}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="mb-1 flex items-center justify-between text-sm">
+                    <div className="mb-1.5 flex items-center justify-between text-sm">
                       <span className="font-medium">{item.name}</span>
                       <div className="flex items-center gap-3 tabular-nums">
                         <span className="text-xs text-[rgb(var(--muted))]">{share}%</span>
@@ -185,8 +175,8 @@ export function ReportsPageClient() {
                     </div>
                     <div className="h-1 overflow-hidden rounded-full bg-[rgb(var(--surface-soft))]">
                       <div
-                        className="h-full rounded-full bg-[rgb(var(--negative))] opacity-60 transition-all duration-500"
-                        style={{ width: `${pct}%` }}
+                        className="h-full rounded-full bg-[rgb(var(--accent))] transition-all duration-700"
+                        style={{ width: `${pct}%`, opacity: Math.max(0.4, 1 - idx * 0.1) }}
                       />
                     </div>
                   </div>

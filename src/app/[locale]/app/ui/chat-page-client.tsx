@@ -2,9 +2,8 @@
 
 import { apiFetch } from "@/shared/api/client";
 import { useI18n } from "@/shared/i18n/i18n-provider";
-import { AppIcons } from "@/shared/icons/app-icons";
 import { useLuca } from "@/shared/providers/luca-provider";
-import { CheckIcon, PaperPlaneTiltIcon, SparkleIcon } from "@phosphor-icons/react/dist/ssr";
+import { ArrowUpIcon, CheckIcon } from "@phosphor-icons/react/dist/ssr";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type TxIntent = {
@@ -38,14 +37,13 @@ export function ChatPageClient() {
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "intro",
-      role: "assistant",
-      content: t("chat.intro")
-    }
+    { id: "intro", role: "assistant", content: t("chat.intro") }
   ]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const hasUserMessages = messages.some((m) => m.role === "user");
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -54,22 +52,25 @@ export function ChatPageClient() {
   const prompts = useMemo(
     () =>
       locale === "ru"
-        ? ["Потратил $52 в Nobu вчера", "Получил $1200 от клиента Alex", "Потратил 300 на рекламу", "Такси 20 баксов"]
-        : ["Spent $52 at Nobu yesterday", "Got $1200 from client Alex", "Paid $300 for ads", "Taxi $20"],
+        ? ["Потратил $52 в Nobu вчера", "Получил $1200 от клиента", "Потратил 300 на рекламу", "Такси 20 баксов"]
+        : ["Spent $52 at Nobu yesterday", "Got $1200 from a client", "Paid $300 for ads", "Taxi $20"],
     [locale]
   );
+
+  function growTextarea(el: HTMLTextAreaElement) {
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 180) + "px";
+  }
 
   async function sendMessage(text?: string) {
     const msg = (text ?? input).trim();
     if (!msg || !workspace) return;
 
     setInput("");
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
     setIsSending(true);
 
-    setMessages((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), role: "user", content: msg }
-    ]);
+    setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "user", content: msg }]);
 
     try {
       const result = await apiFetch<{
@@ -97,9 +98,10 @@ export function ChatPageClient() {
         {
           id: crypto.randomUUID(),
           role: "assistant",
-          content: locale === "ru"
-            ? "Что-то пошло не так. Проверь, что API запущен на 3001."
-            : "Something went wrong. Make sure the API is running on port 3001."
+          content:
+            locale === "ru"
+              ? "Что-то пошло не так. Проверь, что API запущен на 3001."
+              : "Something went wrong. Make sure the API is running on port 3001."
         }
       ]);
     } finally {
@@ -115,103 +117,59 @@ export function ChatPageClient() {
     });
     setMessages((prev) =>
       prev.map((m) =>
-        m.action?.id === actionId
-          ? { ...m, content: t("chat.saved"), action: null, confirmed: true }
-          : m
+        m.action?.id === actionId ? { ...m, content: t("chat.saved"), action: null, confirmed: true } : m
       )
     );
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-var(--header-height)-48px)] max-w-3xl flex-col gap-0">
-      <div className="mb-4 flex items-center gap-2">
-        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[rgb(var(--accent-dim))]">
-          <SparkleIcon size={14} weight="fill" className="text-[rgb(var(--accent))]" />
+    <div className="absolute inset-0 flex flex-col overflow-hidden">
+      {/* Messages / Welcome */}
+      {!hasUserMessages ? (
+        <div className="flex flex-1 flex-col overflow-hidden">
+          {/* Heading — centered in remaining space */}
+          <div className="flex flex-1 items-center justify-center px-4">
+            <h2 className="text-[28px] font-semibold tracking-tight text-[rgb(var(--foreground))]">
+              {locale === "ru" ? "Чем могу помочь?" : "How can I help?"}
+            </h2>
+          </div>
+
+
+          <div className="flex overflow-x-auto no-scrollbar gap-2 px-4 pb-3 lg:px-6 md:justify-center">
+            {prompts.map((p) => (
+              <button
+                key={p}
+                onClick={() => sendMessage(p)}
+                className="whitespace-nowrap rounded-lg border border-[rgb(var(--border))] px-4 py-1 text-xs text-[rgb(var(--muted))] transition-colors hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
+              >
+                {p}
+              </button>
+            ))}
+          </div>
         </div>
-        <h1 className="text-base font-semibold">{t("chat.title")}</h1>
-      </div>
-
-      <div className="flex flex-1 flex-col overflow-hidden rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
-        <div className="flex-1 space-y-3 overflow-y-auto p-4 no-scrollbar">
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={["flex gap-3", message.role === "user" ? "justify-end" : "justify-start"].join(" ")}
-            >
-              {message.role === "assistant" && (
-                <div className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[rgb(var(--accent-dim))] text-[rgb(var(--accent))]">
-                  <SparkleIcon size={12} weight="fill" />
-                </div>
-              )}
-
-              <div className={["max-w-[78%]", message.role === "user" ? "items-end" : "items-start", "flex flex-col gap-2"].join(" ")}>
-                <div
-                  className={[
-                    "rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
-                    message.role === "user"
-                      ? "bg-[rgb(var(--foreground))] text-[rgb(var(--background))] rounded-br-sm"
-                      : "bg-[rgb(var(--surface-soft))] text-[rgb(var(--foreground))] rounded-bl-sm"
-                  ].join(" ")}
-                >
-                  {message.confirmed && (
-                    <span className="mr-1.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-[rgb(var(--positive))] text-white">
-                      <CheckIcon size={10} weight="bold" />
-                    </span>
-                  )}
-                  {message.content}
-                </div>
-
-                {message.action && (
-                  <div className="w-full space-y-2">
-                    {message.action.payloadJson.transactions.map((tx, i) => (
-                      <TxCard key={i} tx={tx} />
-                    ))}
-                    <button
-                      onClick={() => confirmAction(message.action!.id)}
-                      className="flex h-9 items-center gap-2 rounded-xl bg-[rgb(var(--foreground))] px-4 text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85 active:scale-[0.98]"
-                    >
-                      <CheckIcon size={14} weight="bold" />
-                      {t("chat.confirmAndSave")}
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-
-          {isSending && (
-            <div className="flex gap-3">
-              <div className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[rgb(var(--accent-dim))] text-[rgb(var(--accent))]">
-                <SparkleIcon size={12} weight="fill" />
-              </div>
-              <div className="rounded-2xl rounded-bl-sm bg-[rgb(var(--surface-soft))] px-4 py-2.5 text-sm text-[rgb(var(--muted))]">
-                <ThinkingDots />
-              </div>
-            </div>
-          )}
-
-          <div ref={bottomRef} />
+      ) : (
+        <div className="flex-1 overflow-y-auto thin-scrollbar">
+          <div className="mx-auto max-w-2xl space-y-8 px-4 py-10 lg:px-6">
+            {messages.slice(1).map((message) => (
+              <MessageRow key={message.id} message={message} onConfirm={confirmAction} t={t} />
+            ))}
+            {isSending && <ThinkingRow />}
+            <div ref={bottomRef} />
+          </div>
         </div>
+      )}
 
-        <div className="border-t border-[rgb(var(--border))] px-3 py-3">
-          {!messages.some((m) => m.role === "user") && (
-            <div className="mb-3 flex flex-wrap gap-2">
-              {prompts.map((p) => (
-                <button
-                  key={p}
-                  onClick={() => sendMessage(p)}
-                  className="rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 py-1.5 text-xs text-[rgb(var(--muted))] transition hover:border-[rgb(var(--accent)/0.4)] hover:text-[rgb(var(--foreground))]"
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div className="flex items-end gap-2">
+      {/* Input */}
+      <div className="shrink-0 bg-[rgb(var(--background))]">
+        <div className="mx-auto max-w-2xl px-4 pb-5 pt-2 lg:px-6">
+          <div className="rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-4 pb-3 pt-3.5 shadow-sm transition-colors focus-within:border-[rgb(var(--accent))]">
             <textarea
+              ref={textareaRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value);
+                growTextarea(e.target);
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -220,50 +178,112 @@ export function ChatPageClient() {
               }}
               placeholder={t("chat.placeholder")}
               rows={1}
-              className="min-h-9 flex-1 resize-none rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 py-2 text-sm outline-none transition placeholder:text-[rgb(var(--muted))] focus:border-[rgb(var(--accent))] focus:ring-1 focus:ring-[rgb(var(--accent)/0.2)]"
+              className="block w-full resize-none bg-transparent text-sm leading-relaxed outline-none placeholder:text-[rgb(var(--muted))]"
+              style={{ minHeight: "24px", maxHeight: "180px" }}
             />
-            <button
-              onClick={() => sendMessage()}
-              disabled={isSending || !input.trim() || isLoading}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[rgb(var(--foreground))] text-[rgb(var(--background))] transition hover:opacity-85 disabled:opacity-35 active:scale-95"
-            >
-              <PaperPlaneTiltIcon size={15} weight="fill" />
-            </button>
+            <div className="mt-2.5 flex justify-end">
+              <button
+                onClick={() => sendMessage()}
+                disabled={isSending || !input.trim() || isLoading}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-[rgb(var(--foreground))] text-[rgb(var(--background))] transition hover:opacity-80 disabled:opacity-20 active:scale-95"
+              >
+                <ArrowUpIcon size={14} weight="bold" />
+              </button>
+            </div>
           </div>
-        </div>
-      </div>
-
-      <div className="mt-3 flex items-center gap-3">
-        <div className="flex items-center gap-2 text-xs text-[rgb(var(--muted))]">
-          <AppIcons.wallet size={13} weight="duotone" />
-          {defaultAccount
-            ? `${defaultAccount.name} · ${defaultAccount.currency} ${Number(defaultAccount.currentBalance).toLocaleString()}`
-            : t("common.loading")}
+          <p className="mt-2 text-center text-[11px] text-[rgb(var(--muted-soft))]">
+            {locale === "ru"
+              ? "Shift+Enter — новая строка"
+              : "Shift+Enter for new line"}
+          </p>
         </div>
       </div>
     </div>
   );
 }
 
+function MessageRow({
+  message,
+  onConfirm,
+  t
+}: {
+  message: Message;
+  onConfirm: (id: string) => void;
+  t: (key: string) => string;
+}) {
+  if (message.role === "user") {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-[rgb(var(--foreground))] px-4 py-2.5 text-sm leading-relaxed text-[rgb(var(--background))]">
+          {message.content}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm leading-relaxed text-[rgb(var(--foreground))]">
+        {message.confirmed && (
+          <span className="mr-1.5 inline-flex h-[18px] w-[18px] items-center justify-center rounded-full bg-[rgb(var(--positive))] align-middle text-white">
+            <CheckIcon size={10} weight="bold" />
+          </span>
+        )}
+        {message.content}
+      </p>
+
+      {message.action && (
+        <div className="space-y-2">
+          {message.action.payloadJson.transactions.map((tx, i) => (
+            <TxCard key={i} tx={tx} />
+          ))}
+          <button
+            onClick={() => onConfirm(message.action!.id)}
+            className="flex h-9 items-center gap-2 rounded-lg bg-[rgb(var(--foreground))] px-4 text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85 active:scale-[0.98]"
+          >
+            <CheckIcon size={12} weight="bold" />
+            {t("chat.confirmAndSave")}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TxCard({ tx }: { tx: TxIntent }) {
   const isExpense = tx.type === "EXPENSE";
+  const isIncome = tx.type === "INCOME";
+
+  const amountColor = isExpense
+    ? "text-[rgb(var(--negative))]"
+    : isIncome
+      ? "text-[rgb(var(--positive))]"
+      : "text-[rgb(var(--foreground))]";
+
+  const badge = isExpense
+    ? "bg-[rgb(var(--negative-dim))] text-[rgb(var(--negative))]"
+    : isIncome
+      ? "bg-[rgb(var(--positive-dim))] text-[rgb(var(--positive))]"
+      : "bg-[rgb(var(--surface-soft))] text-[rgb(var(--muted))]";
+
   return (
-    <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-3">
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <div className="text-xs font-medium uppercase tracking-wide text-[rgb(var(--muted))]">
-            {tx.type}
-          </div>
-          <div className={["mt-1 text-xl font-semibold tracking-tight", isExpense ? "text-[rgb(var(--negative))]" : "text-[rgb(var(--positive))]"].join(" ")}>
-            {isExpense ? "−" : "+"}{tx.amount} {tx.currency}
-          </div>
-          {(tx.categoryName || tx.merchant) && (
-            <div className="mt-1 text-xs text-[rgb(var(--muted))]">
-              {[tx.categoryName, tx.merchant].filter(Boolean).join(" · ")}
-            </div>
-          )}
+    <div className="flex items-center justify-between gap-4 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-4 py-3">
+      <div className="min-w-0">
+        <div className={["text-base font-semibold tabular-nums", amountColor].join(" ")}>
+          {isExpense ? "−" : isIncome ? "+" : ""}
+          {tx.amount} {tx.currency}
         </div>
-        <div className="rounded-md bg-[rgb(var(--surface-soft))] px-2 py-0.5 text-xs text-[rgb(var(--muted))]">
+        {(tx.categoryName || tx.merchant) && (
+          <div className="mt-0.5 truncate text-sm text-[rgb(var(--muted))]">
+            {[tx.categoryName, tx.merchant].filter(Boolean).join(" · ")}
+          </div>
+        )}
+      </div>
+      <div className="shrink-0 text-right">
+        <span className={["rounded-full px-2.5 py-0.5 text-xs font-medium", badge].join(" ")}>
+          {tx.type}
+        </span>
+        <div className="mt-1 text-xs text-[rgb(var(--muted-soft))]">
           {Math.round(tx.confidence * 100)}%
         </div>
       </div>
@@ -271,16 +291,16 @@ function TxCard({ tx }: { tx: TxIntent }) {
   );
 }
 
-function ThinkingDots() {
+function ThinkingRow() {
   return (
-    <span className="inline-flex gap-1">
+    <div className="flex items-center gap-1">
       {[0, 1, 2].map((i) => (
         <span
           key={i}
-          className="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-current"
-          style={{ animationDelay: `${i * 150}ms` }}
+          className="block h-1.5 w-1.5 animate-bounce rounded-full bg-[rgb(var(--muted))]"
+          style={{ animationDelay: `${i * 120}ms` }}
         />
       ))}
-    </span>
+    </div>
   );
 }

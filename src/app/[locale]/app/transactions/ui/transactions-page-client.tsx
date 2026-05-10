@@ -49,7 +49,7 @@ function groupByDay(txs: Transaction[]): DayGroup[] {
 }
 
 export function TransactionsPageClient() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { workspace, isLoading: bootstrapLoading, reload: reloadContext } = useLuca();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,6 +86,11 @@ export function TransactionsPageClient() {
   const groups = groupByDay(transactions);
   const isSpinning = bootstrapLoading || loading;
 
+  const txCountLabel = (n: number) =>
+    locale === "ru"
+      ? `${n} ${n === 1 ? "операция" : n < 5 ? "операции" : "операций"}`
+      : `${n} ${n === 1 ? "transaction" : "transactions"}`;
+
   return (
     <div className="max-w-2xl">
       <div className="mb-6 flex items-center justify-between">
@@ -93,9 +98,11 @@ export function TransactionsPageClient() {
           <h1 className="text-xl font-semibold tracking-tight">{t("transactions.title")}</h1>
           <p className="mt-0.5 text-sm text-[rgb(var(--muted))]">{t("transactions.subtitle")}</p>
         </div>
-        <div className="text-sm text-[rgb(var(--muted))]">
-          {!isSpinning && transactions.length > 0 && `${transactions.length}`}
-        </div>
+        {!isSpinning && transactions.length > 0 && (
+          <div className="text-xs text-[rgb(var(--muted))]">
+            {txCountLabel(transactions.length)}
+          </div>
+        )}
       </div>
 
       {isSpinning ? (
@@ -103,30 +110,30 @@ export function TransactionsPageClient() {
           {[1, 2, 3, 4, 5].map((i) => (
             <div
               key={i}
-              className="h-14 animate-pulse rounded-xl bg-[rgb(var(--surface))] border border-[rgb(var(--border))]"
+              className="h-14 animate-pulse rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]"
             />
           ))}
         </div>
       ) : groups.length === 0 ? (
         <div className="flex flex-col items-center py-24 text-center">
-          <div className="mb-3 text-3xl opacity-20">💸</div>
+          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[rgb(var(--surface-soft))]">
+            <span className="text-3xl opacity-30">💸</span>
+          </div>
           <p className="text-sm text-[rgb(var(--muted))]">{t("transactions.empty")}</p>
         </div>
       ) : (
-        <div className="space-y-5">
+        <div className="space-y-6">
           {groups.map((group) => (
             <div key={group.iso}>
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-xs font-medium uppercase tracking-widest text-[rgb(var(--muted))]">
+              <div className="mb-2.5 flex items-center justify-between">
+                <span className="text-xs font-semibold text-[rgb(var(--muted))]">
                   {group.label}
                 </span>
-                <span className="text-xs text-[rgb(var(--muted))]">
-                  {group.items.length === 1
-                    ? "1 transaction"
-                    : `${group.items.length} transactions`}
+                <span className="text-xs text-[rgb(var(--muted-soft))]">
+                  {txCountLabel(group.items.length)}
                 </span>
               </div>
-              <div className="overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
+              <div className="overflow-hidden rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
                 {group.items.map((tx, idx) => (
                   <TxRow
                     key={tx.id}
@@ -162,33 +169,36 @@ function TxRow({
   const label = tx.merchant || tx.category?.name || tx.comment || tx.type;
   const sub = tx.merchant && tx.category?.name ? tx.category.name : null;
 
+  const iconBg = isExpense
+    ? "bg-[rgb(var(--negative-dim))] text-[rgb(var(--negative))]"
+    : isIncome
+    ? "bg-[rgb(var(--positive-dim))] text-[rgb(var(--positive))]"
+    : "bg-[rgb(var(--surface-soft))] text-[rgb(var(--muted))]";
+
+  const amountColor = isExpense
+    ? "text-[rgb(var(--negative))]"
+    : isIncome
+    ? "text-[rgb(var(--positive))]"
+    : "text-[rgb(var(--foreground))]";
+
   return (
     <div
       className={[
-        "group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-[rgb(var(--surface-soft))]",
+        "group flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-[rgb(var(--surface-soft))]",
         !isLast ? "border-b border-[rgb(var(--border-soft))]" : "",
         isDeleting ? "opacity-40" : ""
       ].join(" ")}
     >
-      {/* Type icon */}
-      <div
-        className={[
-          "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs",
-          isExpense
-            ? "bg-[rgb(var(--negative-dim))] text-[rgb(var(--negative))]"
-            : isIncome
-            ? "bg-[rgb(var(--positive-dim))] text-[rgb(var(--positive))]"
-            : "bg-[rgb(var(--surface-soft))] text-[rgb(var(--muted))]"
-        ].join(" ")}
-      >
+      {/* Icon */}
+      <div className={["flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-sm", iconBg].join(" ")}>
         {tx.category?.icon ? (
-          <span className="text-sm leading-none">{tx.category.icon}</span>
+          <span className="leading-none">{tx.category.icon}</span>
         ) : isExpense ? (
-          <ArrowDownIcon size={14} weight="bold" />
+          <ArrowDownIcon size={15} weight="bold" />
         ) : isIncome ? (
-          <ArrowUpIcon size={14} weight="bold" />
+          <ArrowUpIcon size={15} weight="bold" />
         ) : (
-          <ArrowsLeftRightIcon size={14} weight="bold" />
+          <ArrowsLeftRightIcon size={15} weight="bold" />
         )}
       </div>
 
@@ -203,21 +213,12 @@ function TxRow({
       </div>
 
       {/* Amount */}
-      <div
-        className={[
-          "shrink-0 text-sm font-semibold tabular-nums",
-          isExpense
-            ? "text-[rgb(var(--negative))]"
-            : isIncome
-            ? "text-[rgb(var(--positive))]"
-            : "text-[rgb(var(--foreground))]"
-        ].join(" ")}
-      >
+      <div className={["shrink-0 text-sm font-semibold tabular-nums", amountColor].join(" ")}>
         {isExpense ? "−" : isIncome ? "+" : ""}
         {amount.toFixed(2)} {tx.currency}
       </div>
 
-      {/* Delete button — visible on hover */}
+      {/* Delete — on hover */}
       <button
         onClick={onDelete}
         disabled={isDeleting}

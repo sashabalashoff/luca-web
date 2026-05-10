@@ -41,21 +41,21 @@ export function LoginView({ locale }: { locale: string }) {
   }
 
   return (
-    <div className="luca-bg relative flex min-h-screen items-center justify-center px-4">
-      <div className="absolute right-4 top-4 flex items-center gap-2">
+    <div className="relative flex min-h-dvh items-center justify-center bg-[rgb(var(--background))] px-4">
+      <div className="absolute right-4 top-4 flex items-center gap-1">
         <LanguageSwitcher />
         <ThemeSwitcher />
       </div>
 
       <div className="w-full max-w-sm">
         <div className="mb-10">
-          <div className="mb-6 font-mono text-xs font-bold tracking-[0.2em] uppercase text-[rgb(var(--accent))]">
+          <div className="mb-1 text-[13px] font-semibold uppercase tracking-widest text-[rgb(var(--accent))]">
             LUCA
           </div>
-          <h1 className="text-3xl font-semibold tracking-tight">
-            {isRu ? "Войти в LUCA" : "Sign in to LUCA"}
+          <h1 className="text-[1.875rem] font-bold tracking-tight text-[rgb(var(--foreground))]">
+            {isRu ? "Войти" : "Sign in"}
           </h1>
-          <p className="mt-2 text-sm text-[rgb(var(--muted))]">
+          <p className="mt-2 text-sm leading-relaxed text-[rgb(var(--muted))]">
             {isRu
               ? "AI-first пространство для личных и бизнес-финансов."
               : "AI-first workspace for personal and business money."}
@@ -64,11 +64,11 @@ export function LoginView({ locale }: { locale: string }) {
 
         {sent ? (
           <div className="rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-6 text-center">
-            <div className="mb-2 text-2xl">✉️</div>
-            <div className="font-medium">
+            <div className="mb-3 text-3xl">✉️</div>
+            <div className="font-semibold">
               {isRu ? "Проверь почту" : "Check your email"}
             </div>
-            <p className="mt-1 text-sm text-[rgb(var(--muted))]">
+            <p className="mt-1.5 text-sm text-[rgb(var(--muted))]">
               {isRu
                 ? `Magic link отправлен на ${email}`
                 : `Magic link sent to ${email}`}
@@ -78,16 +78,16 @@ export function LoginView({ locale }: { locale: string }) {
           <div className="space-y-3">
             <button
               onClick={signInWithGoogle}
-              className="flex h-10 w-full items-center justify-center gap-2.5 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] text-sm font-medium transition hover:bg-[rgb(var(--surface-soft))] active:scale-[0.99]"
+              className="flex h-11 w-full items-center justify-center gap-2.5 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] text-sm font-medium transition-colors hover:bg-[rgb(var(--surface-soft))] active:scale-[0.99]"
             >
-              <GoogleLogoIcon size={16} weight="bold" />
+              <GoogleLogoIcon size={15} weight="bold" />
               {isRu ? "Продолжить с Google" : "Continue with Google"}
             </button>
 
             <div className="flex items-center gap-3">
               <div className="h-px flex-1 bg-[rgb(var(--border))]" />
               <span className="text-xs text-[rgb(var(--muted))]">
-                {isRu ? "или" : "or"}
+                {isRu ? "или по email" : "or with email"}
               </span>
               <div className="h-px flex-1 bg-[rgb(var(--border))]" />
             </div>
@@ -99,12 +99,12 @@ export function LoginView({ locale }: { locale: string }) {
                 onKeyDown={(e) => e.key === "Enter" && signInWithEmail()}
                 placeholder={isRu ? "email@example.com" : "you@example.com"}
                 type="email"
-                className="h-10 min-w-0 flex-1 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 text-sm outline-none transition placeholder:text-[rgb(var(--muted))] focus:border-[rgb(var(--accent))] focus:ring-1 focus:ring-[rgb(var(--accent)/0.3)]"
+                className="h-11 min-w-0 flex-1 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3.5 text-sm outline-none transition placeholder:text-[rgb(var(--muted))] focus:border-[rgb(var(--accent))] focus:ring-2 focus:ring-[rgb(var(--accent)/0.12)]"
               />
               <button
                 onClick={signInWithEmail}
                 disabled={!email || isLoading}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[rgb(var(--foreground))] text-[rgb(var(--background))] transition hover:opacity-85 disabled:opacity-40 active:scale-[0.97]"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[rgb(var(--accent))] text-white transition hover:bg-[rgb(var(--accent-hover))] disabled:opacity-40 active:scale-[0.97]"
               >
                 <ArrowRightIcon size={15} weight="bold" />
               </button>
