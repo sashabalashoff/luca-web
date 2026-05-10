@@ -3,9 +3,14 @@
 import { apiFetch, getAuthToken } from "@/shared/api/client";
 import { useI18n } from "@/shared/i18n/i18n-provider";
 import { useLuca } from "@/shared/providers/luca-provider";
-import { ArrowUpIcon, CheckIcon, XIcon } from "@phosphor-icons/react/dist/ssr";
+import {
+  ArrowUpIcon,
+  BankIcon,
+  CheckIcon,
+  XIcon,
+} from "@phosphor-icons/react/dist/ssr";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type TxIntent = {
   type: "INCOME" | "EXPENSE" | "TRANSFER";
@@ -36,6 +41,7 @@ type Message = {
   confirmed?: boolean;
   rejected?: boolean;
   streaming?: boolean;
+  savedTxs?: TxIntent[];
 };
 
 const INTRO_ID = "intro";
@@ -54,7 +60,6 @@ export function ChatPageClient() {
   const [isSending, setIsSending] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
 
-  // Track sessions we just created to avoid re-loading them from API
   const sessionWasCreatedByUs = useRef(new Set<string>());
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -65,7 +70,6 @@ export function ChatPageClient() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isSending]);
 
-  // Load or reset chat when session param changes
   useEffect(() => {
     if (!workspace) return;
 
@@ -99,21 +103,17 @@ export function ChatPageClient() {
               ? { id: msg.action.id, payloadJson: msg.action.payloadJson }
               : null,
           confirmed: msg.action?.status === "EXECUTED",
-          rejected: msg.action?.status === "REJECTED"
+          rejected: msg.action?.status === "REJECTED",
+          savedTxs:
+            msg.action?.status === "EXECUTED"
+              ? msg.action.payloadJson.transactions
+              : undefined,
         }));
         setMessages(mapped);
       })
       .catch(console.error)
       .finally(() => setHistoryLoading(false));
   }, [sessionId, workspace]);
-
-  const prompts = useMemo(
-    () =>
-      locale === "ru"
-        ? ["Потратил $52 в Nobu вчера", "Получил $1200 от клиента", "Потратил 300 на рекламу", "Такси 20 баксов"]
-        : ["Spent $52 at Nobu yesterday", "Got $1200 from a client", "Paid $300 for ads", "Taxi $20"],
-    [locale]
-  );
 
   function growTextarea(el: HTMLTextAreaElement) {
     el.style.height = "auto";
@@ -201,9 +201,12 @@ export function ChatPageClient() {
             );
           } else if (eventType === "done") {
             const newSessionId = payload.sessionId as string;
+            const finalMessage = payload.finalMessage as string | undefined;
             setMessages((prev) =>
               prev.map((m) =>
-                m.id === assistantMsgId ? { ...m, streaming: false } : m
+                m.id === assistantMsgId
+                  ? { ...m, streaming: false, content: finalMessage ?? m.content }
+                  : m
               )
             );
             if (newSessionId && newSessionId !== sessionId) {
@@ -234,30 +237,48 @@ export function ChatPageClient() {
 
   async function confirmAction(actionId: string) {
     if (!defaultAccount) return;
+
+    const action = messages.find((m) => m.action?.id === actionId)?.action;
+    const txs = action?.payloadJson.transactions ?? [];
+
+    // Optimistic update
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.action?.id === actionId
+          ? { ...m, confirmed: true, action: null, savedTxs: txs }
+          : m
+      )
+    );
+
     try {
       await apiFetch(`/api/ai/actions/${actionId}/confirm`, {
         method: "POST",
         body: JSON.stringify({ accountId: defaultAccount.id })
       });
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.action?.id === actionId ? { ...m, confirmed: true, action: null } : m
-        )
-      );
       reload();
     } catch (err) {
       console.error(err);
+      // Rollback on error
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.confirmed && m.savedTxs === txs
+            ? { ...m, confirmed: false, action, savedTxs: undefined }
+            : m
+        )
+      );
     }
   }
 
   async function rejectAction(actionId: string) {
+    // Optimistic update
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.action?.id === actionId ? { ...m, rejected: true, action: null } : m
+      )
+    );
+
     try {
       await apiFetch(`/api/ai/actions/${actionId}/reject`, { method: "POST" });
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.action?.id === actionId ? { ...m, rejected: true, action: null } : m
-        )
-      );
     } catch (err) {
       console.error(err);
     }
@@ -267,35 +288,17 @@ export function ChatPageClient() {
     <div className="absolute inset-0 flex flex-col overflow-hidden">
       {historyLoading ? (
         <div className="flex flex-1 items-center justify-center">
-          <div className="flex gap-1.5">
-            {[0, 1, 2].map((i) => (
-              <span
-                key={i}
-                className="block h-2 w-2 animate-bounce rounded-full bg-[rgb(var(--muted))]"
-                style={{ animationDelay: `${i * 120}ms` }}
-              />
-            ))}
-          </div>
+          <Dots />
         </div>
       ) : !hasUserMessages ? (
         /* Welcome screen */
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <div className="flex flex-1 items-center justify-center px-4">
-            <h2 className="text-[28px] font-semibold tracking-tight text-[rgb(var(--foreground))]">
-              {locale === "ru" ? "Чем могу помочь?" : "How can I help?"}
-            </h2>
-          </div>
-          <div className="flex overflow-x-auto no-scrollbar gap-2 px-4 pb-3 lg:px-6 md:justify-center">
-            {prompts.map((p) => (
-              <button
-                key={p}
-                onClick={() => sendMessage(p)}
-                className="whitespace-nowrap rounded-lg border border-[rgb(var(--border))] px-4 py-1 text-xs text-[rgb(var(--muted))] transition-colors hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
-              >
-                {p}
-              </button>
-            ))}
-          </div>
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4">
+          <h2 className="text-2xl font-semibold tracking-tight text-[rgb(var(--foreground))]">
+            {locale === "ru" ? "Чем могу помочь?" : "How can I help?"}
+          </h2>
+          <p className="max-w-sm text-center text-sm text-[rgb(var(--muted))]">
+            {t("chat.subtitle")}
+          </p>
         </div>
       ) : (
         /* Messages list */
@@ -307,9 +310,11 @@ export function ChatPageClient() {
                 <MessageRow
                   key={message.id}
                   message={message}
+                  defaultAccountName={defaultAccount?.name}
                   onConfirm={confirmAction}
                   onReject={rejectAction}
                   t={t}
+                  locale={locale}
                 />
               ))}
             <div ref={bottomRef} />
@@ -358,16 +363,34 @@ export function ChatPageClient() {
   );
 }
 
+function Dots() {
+  return (
+    <div className="flex gap-1.5">
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="block h-2 w-2 animate-bounce rounded-full bg-[rgb(var(--muted))]"
+          style={{ animationDelay: `${i * 120}ms` }}
+        />
+      ))}
+    </div>
+  );
+}
+
 function MessageRow({
   message,
+  defaultAccountName,
   onConfirm,
   onReject,
-  t
+  t,
+  locale,
 }: {
   message: Message;
+  defaultAccountName?: string;
   onConfirm: (id: string) => void;
   onReject: (id: string) => void;
   t: (key: string) => string;
+  locale: string;
 }) {
   if (message.role === "user") {
     return (
@@ -379,39 +402,37 @@ function MessageRow({
     );
   }
 
-  // Thinking state: streaming but no content yet
-  if (message.streaming && !message.content) {
+  if (message.streaming && !message.content && !message.action) {
     return (
-      <div className="flex items-center gap-1">
-        {[0, 1, 2].map((i) => (
-          <span
-            key={i}
-            className="block h-1.5 w-1.5 animate-bounce rounded-full bg-[rgb(var(--muted))]"
-            style={{ animationDelay: `${i * 120}ms` }}
-          />
-        ))}
+      <div className="flex items-center gap-1.5">
+        <Dots />
       </div>
     );
   }
 
   return (
     <div className="space-y-3">
-      <p className="whitespace-pre-wrap text-sm leading-relaxed text-[rgb(var(--foreground))]">
-        {message.confirmed && (
-          <span className="mr-1.5 inline-flex h-[18px] w-[18px] items-center justify-center rounded-full bg-[rgb(var(--positive))] align-middle text-white">
-            <CheckIcon size={10} weight="bold" />
-          </span>
-        )}
-        {message.content}
-        {message.streaming && (
-          <span className="ml-0.5 inline-block h-[13px] w-[2px] animate-pulse bg-[rgb(var(--foreground))] align-middle" />
-        )}
-      </p>
+      {/* Text content */}
+      {message.content && (
+        <p className="whitespace-pre-wrap text-sm leading-relaxed text-[rgb(var(--foreground))]">
+          {message.content}
+          {message.streaming && (
+            <span className="ml-0.5 inline-block h-[13px] w-[2px] animate-pulse bg-[rgb(var(--foreground))] align-middle" />
+          )}
+        </p>
+      )}
 
+      {/* Pending action — confirmation required */}
       {message.action && (
         <div className="space-y-2">
           {message.action.payloadJson.transactions.map((tx, i) => (
-            <TxCard key={i} tx={tx} t={t} />
+            <TxConfirmCard
+              key={i}
+              tx={tx}
+              accountName={defaultAccountName}
+              t={t}
+              locale={locale}
+            />
           ))}
           <div className="flex gap-2">
             <button
@@ -431,11 +452,50 @@ function MessageRow({
           </div>
         </div>
       )}
+
+      {/* Confirmed — saved transactions */}
+      {message.confirmed && message.savedTxs && message.savedTxs.length > 0 && (
+        <div className="space-y-2">
+          {message.savedTxs.map((tx, i) => (
+            <TxSavedCard key={i} tx={tx} t={t} locale={locale} />
+          ))}
+        </div>
+      )}
+
+      {/* Rejected state */}
+      {message.rejected && (
+        <div className="flex items-center gap-2 rounded-xl border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] px-4 py-2.5 text-sm text-[rgb(var(--muted))]">
+          <XIcon size={13} />
+          {locale === "ru" ? "Транзакция отклонена" : "Transaction rejected"}
+        </div>
+      )}
     </div>
   );
 }
 
-function TxCard({ tx, t }: { tx: TxIntent; t: (key: string) => string }) {
+function formatDate(iso: string, locale: string): string {
+  try {
+    return new Date(iso).toLocaleDateString(locale === "ru" ? "ru-RU" : "en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  } catch {
+    return iso.slice(0, 10);
+  }
+}
+
+function TxConfirmCard({
+  tx,
+  accountName,
+  t,
+  locale,
+}: {
+  tx: TxIntent;
+  accountName?: string;
+  t: (key: string) => string;
+  locale: string;
+}) {
   const isExpense = tx.type === "EXPENSE";
   const isIncome = tx.type === "INCOME";
 
@@ -445,7 +505,7 @@ function TxCard({ tx, t }: { tx: TxIntent; t: (key: string) => string }) {
       ? "text-[rgb(var(--positive))]"
       : "text-[rgb(var(--foreground))]";
 
-  const badge = isExpense
+  const badgeBg = isExpense
     ? "bg-[rgb(var(--negative-dim))] text-[rgb(var(--negative))]"
     : isIncome
       ? "bg-[rgb(var(--positive-dim))] text-[rgb(var(--positive))]"
@@ -457,30 +517,85 @@ function TxCard({ tx, t }: { tx: TxIntent; t: (key: string) => string }) {
       ? t("transactions.income")
       : t("transactions.transfer");
 
+  const sign = isExpense ? "−" : isIncome ? "+" : "";
+
   return (
-    <div className="flex items-center justify-between gap-4 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-4 py-3">
-      <div className="min-w-0">
-        <div className={["text-base font-semibold tabular-nums", amountColor].join(" ")}>
-          {isExpense ? "−" : isIncome ? "+" : ""}
-          {tx.amount} {tx.currency}
-        </div>
-        {(tx.categoryName || tx.merchant || tx.counterparty) && (
-          <div className="mt-0.5 truncate text-sm text-[rgb(var(--muted))]">
-            {[tx.categoryName, tx.merchant || tx.counterparty].filter(Boolean).join(" · ")}
+    <div className="overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
+      <div className="flex items-start justify-between gap-3 px-4 py-3">
+        <div className="min-w-0">
+          <div className={["text-lg font-semibold tabular-nums leading-tight", amountColor].join(" ")}>
+            {sign}{tx.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {tx.currency}
           </div>
-        )}
-        {tx.comment && (
-          <div className="truncate text-xs text-[rgb(var(--muted-soft))]">{tx.comment}</div>
-        )}
-      </div>
-      <div className="shrink-0 text-right">
-        <span className={["rounded-full px-2.5 py-0.5 text-xs font-medium", badge].join(" ")}>
+          {(tx.merchant || tx.counterparty) && (
+            <div className="mt-0.5 text-sm font-medium text-[rgb(var(--foreground))]">
+              {tx.merchant || tx.counterparty}
+            </div>
+          )}
+          {tx.categoryName && (
+            <div className="text-xs text-[rgb(var(--muted))]">{tx.categoryName}</div>
+          )}
+          {tx.comment && (
+            <div className="mt-0.5 text-xs text-[rgb(var(--muted-soft))]">{tx.comment}</div>
+          )}
+        </div>
+        <span className={["shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium", badgeBg].join(" ")}>
           {typeLabel}
         </span>
-        <div className="mt-1 text-xs text-[rgb(var(--muted-soft))]">
-          {Math.round(tx.confidence * 100)}%
+      </div>
+      <div className="flex items-center gap-3 border-t border-[rgb(var(--border-soft))] px-4 py-2 text-[11px] text-[rgb(var(--muted))]">
+        {tx.date && <span>{formatDate(tx.date, locale)}</span>}
+        {accountName && (
+          <>
+            <span className="opacity-40">·</span>
+            <span className="flex items-center gap-1">
+              <BankIcon size={10} />
+              {accountName}
+            </span>
+          </>
+        )}
+        <span className="opacity-40">·</span>
+        <span>{Math.round(tx.confidence * 100)}% {t("chat.confidence")}</span>
+      </div>
+    </div>
+  );
+}
+
+function TxSavedCard({
+  tx,
+  t,
+  locale,
+}: {
+  tx: TxIntent;
+  t: (key: string) => string;
+  locale: string;
+}) {
+  const isExpense = tx.type === "EXPENSE";
+  const isIncome = tx.type === "INCOME";
+  const sign = isExpense ? "−" : isIncome ? "+" : "";
+  const amountColor = isExpense
+    ? "text-[rgb(var(--negative))]"
+    : isIncome
+      ? "text-[rgb(var(--positive))]"
+      : "text-[rgb(var(--foreground))]";
+
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] px-4 py-2.5">
+      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[rgb(var(--positive))]">
+        <CheckIcon size={10} weight="bold" className="text-white" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className={["text-sm font-semibold tabular-nums", amountColor].join(" ")}>
+          {sign}{tx.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {tx.currency}
+        </div>
+        <div className="truncate text-[11px] text-[rgb(var(--muted))]">
+          {[tx.merchant || tx.counterparty, tx.categoryName, tx.date ? formatDate(tx.date, locale) : null]
+            .filter(Boolean)
+            .join(" · ")}
         </div>
       </div>
+      <span className="shrink-0 text-xs font-medium text-[rgb(var(--positive))]">
+        {t("chat.saved")}
+      </span>
     </div>
   );
 }

@@ -9,6 +9,8 @@ common:
   language: "Language"
   theme: "Theme"
   logout: "Log out"
+  darkMode: "Dark mode"
+  lightMode: "Light mode"
 
 landing:
   badge: "AI-first financial workspace"
@@ -38,20 +40,20 @@ navigation:
 
 chat:
   title: "LUCA Chat"
-  subtitle: "Tell LUCA what happened with your money."
-  placeholder: "Spent $52 at Nobu yesterday..."
-  intro: "Tell me what happened with your money. For example: \"Spent $52 at Nobu yesterday\" or \"Got $1200 from client Alex\"."
+  subtitle: "Your AI CFO — ask anything about your finances."
+  placeholder: "Tell me what happened with your money..."
+  intro: "Ask me anything about your finances or tell me about a transaction."
   thinking: "LUCA is thinking..."
-  confirmAndSave: "Confirm and save"
-  saved: "Saved. Transaction added."
-  tryPrompts: "Try prompts"
+  confirmAndSave: "Confirm"
+  saved: "Saved"
   defaultAccount: "Default account"
-  aiCommandCenter: "AI financial command center"
+  willAddTo: "Will be added to"
   sessions: "Recent chats"
   newChat: "New chat"
   reject: "Reject"
   noSessions: "No sessions yet"
   error: "Something went wrong. Make sure the API is running."
+  confidence: "confidence"
 
 dashboard:
   title: "Dashboard"
@@ -62,6 +64,8 @@ dashboard:
   savingsRate: "Savings rate"
   topCategories: "Top categories"
   noData: "No expense data yet."
+  accounts: "Account balances"
+  noAccounts: "No accounts yet."
 
 transactions:
   title: "Transactions"
@@ -118,6 +122,14 @@ settings:
   addAccount: "Add account"
   accountName: "Account name"
   saved: "Saved"
+
+workspace:
+  switcher: "Workspaces"
+  new: "New workspace"
+  newName: "Workspace name"
+  personal: "personal"
+  business: "business"
+  custom: "custom"
 
 accounts:
   title: "Accounts"

@@ -7,7 +7,8 @@ import {
   ArrowDownRightIcon,
   ArrowUpRightIcon,
   ArrowsHorizontalIcon,
-  PiggyBankIcon
+  BankIcon,
+  PiggyBankIcon,
 } from "@phosphor-icons/react/dist/ssr";
 import { useEffect, useState } from "react";
 
@@ -23,31 +24,30 @@ function fmt(n: number) {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-/* Stat card color config */
 type CardColor = "positive" | "negative" | "accent" | "default";
 
 const iconBgClass: Record<CardColor, string> = {
   positive: "bg-[rgb(var(--positive-dim))]",
   negative: "bg-[rgb(var(--negative-dim))]",
   accent:   "bg-[rgb(var(--accent-dim))]",
-  default:  "bg-[rgb(var(--surface-soft))]"
+  default:  "bg-[rgb(var(--surface-soft))]",
 };
 const iconColorClass: Record<CardColor, string> = {
   positive: "text-[rgb(var(--positive))]",
   negative: "text-[rgb(var(--negative))]",
   accent:   "text-[rgb(var(--accent))]",
-  default:  "text-[rgb(var(--muted))]"
+  default:  "text-[rgb(var(--muted))]",
 };
 const valueColorClass: Record<CardColor, string> = {
   positive: "text-[rgb(var(--positive))]",
   negative: "text-[rgb(var(--negative))]",
   accent:   "text-[rgb(var(--accent))]",
-  default:  "text-[rgb(var(--foreground))]"
+  default:  "text-[rgb(var(--foreground))]",
 };
 
 export function DashboardPageClient() {
   const { t } = useI18n();
-  const { workspace } = useLuca();
+  const { workspace, accounts, transactionKey } = useLuca();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -57,7 +57,9 @@ export function DashboardPageClient() {
     async function fetchData() {
       if (active) setLoading(true);
       try {
-        const data = await apiFetch<Summary>(`/api/reports/monthly-summary?workspaceId=${workspace!.id}`);
+        const data = await apiFetch<Summary>(
+          `/api/reports/monthly-summary?workspaceId=${workspace!.id}`
+        );
         if (active) setSummary(data);
       } catch (err) {
         console.error(err);
@@ -67,42 +69,98 @@ export function DashboardPageClient() {
     }
     fetchData();
     return () => { active = false; };
-  }, [workspace]);
+  }, [workspace, transactionKey]);
 
   const currency = workspace?.baseCurrency ?? "USD";
-  const maxCategory = Math.max(...(summary?.categoryBreakdown ?? []).map((c) => c.amount), 1);
-
+  const maxCategory = Math.max(
+    ...(summary?.categoryBreakdown ?? []).map((c) => c.amount),
+    1
+  );
   const netColor: CardColor =
     summary && summary.net >= 0 ? "positive" : "negative";
 
+  const totalBalance = accounts.reduce(
+    (s, a) => s + Number(a.currentBalance),
+    0
+  );
+
   return (
     <div className="max-w-4xl space-y-6">
-      {/* ── Stat cards ── */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard
-          label={t("dashboard.income")}
-          value={loading ? null : `${currency} ${fmt(summary?.income ?? 0)}`}
-          icon={ArrowUpRightIcon}
-          color="positive"
-        />
-        <StatCard
-          label={t("dashboard.expenses")}
-          value={loading ? null : `${currency} ${fmt(summary?.expenses ?? 0)}`}
-          icon={ArrowDownRightIcon}
-          color="negative"
-        />
-        <StatCard
-          label={t("dashboard.net")}
-          value={loading ? null : `${currency} ${fmt(summary?.net ?? 0)}`}
-          icon={ArrowsHorizontalIcon}
-          color={netColor}
-        />
-        <StatCard
-          label={t("dashboard.savingsRate")}
-          value={loading ? null : `${(summary?.savingsRate ?? 0).toFixed(1)}%`}
-          icon={PiggyBankIcon}
-          color="accent"
-        />
+      {/* ── Account balances ── */}
+      {accounts.length > 0 && (
+        <div>
+          <h2 className="mb-3 text-sm font-semibold text-[rgb(var(--muted))]">
+            {t("dashboard.accounts")}
+          </h2>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {accounts.map((acc) => (
+              <div
+                key={acc.id}
+                className="rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-4"
+              >
+                <div className="mb-3 flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[rgb(var(--surface-soft))]">
+                    <BankIcon size={14} className="text-[rgb(var(--muted))]" />
+                  </div>
+                  <span className="truncate text-xs font-medium text-[rgb(var(--muted))]">
+                    {acc.name}
+                  </span>
+                </div>
+                <div className="text-base font-semibold tabular-nums text-[rgb(var(--foreground))]">
+                  {acc.currency} {fmt(Number(acc.currentBalance))}
+                </div>
+              </div>
+            ))}
+            {accounts.length > 1 && (
+              <div className="rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--accent-dim))] p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[rgb(var(--accent))]/15">
+                    <ArrowsHorizontalIcon size={14} className="text-[rgb(var(--accent))]" />
+                  </div>
+                  <span className="truncate text-xs font-medium text-[rgb(var(--accent))]">
+                    Total
+                  </span>
+                </div>
+                <div className="text-base font-semibold tabular-nums text-[rgb(var(--accent))]">
+                  {currency} {fmt(totalBalance)}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Monthly stat cards ── */}
+      <div>
+        <h2 className="mb-3 text-sm font-semibold text-[rgb(var(--muted))]">
+          {t("dashboard.subtitle")}
+        </h2>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <StatCard
+            label={t("dashboard.income")}
+            value={loading ? null : `${currency} ${fmt(summary?.income ?? 0)}`}
+            icon={ArrowUpRightIcon}
+            color="positive"
+          />
+          <StatCard
+            label={t("dashboard.expenses")}
+            value={loading ? null : `${currency} ${fmt(summary?.expenses ?? 0)}`}
+            icon={ArrowDownRightIcon}
+            color="negative"
+          />
+          <StatCard
+            label={t("dashboard.net")}
+            value={loading ? null : `${currency} ${fmt(summary?.net ?? 0)}`}
+            icon={ArrowsHorizontalIcon}
+            color={netColor}
+          />
+          <StatCard
+            label={t("dashboard.savingsRate")}
+            value={loading ? null : `${(summary?.savingsRate ?? 0).toFixed(1)}%`}
+            icon={PiggyBankIcon}
+            color="accent"
+          />
+        </div>
       </div>
 
       {/* ── Category breakdown ── */}
@@ -162,7 +220,7 @@ export function DashboardPageClient() {
                         style={{
                           width: `${pct}%`,
                           background: `rgb(var(--accent))`,
-                          opacity: Math.max(0.35, 1 - idx * 0.1)
+                          opacity: Math.max(0.35, 1 - idx * 0.1),
                         }}
                       />
                     </div>
@@ -181,7 +239,7 @@ function StatCard({
   label,
   value,
   icon: Icon,
-  color = "default"
+  color = "default",
 }: {
   label: string;
   value: string | null;
@@ -190,14 +248,24 @@ function StatCard({
 }) {
   return (
     <div className="rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-5">
-      <div className={["mb-4 inline-flex h-9 w-9 items-center justify-center rounded-xl", iconBgClass[color]].join(" ")}>
+      <div
+        className={[
+          "mb-4 inline-flex h-9 w-9 items-center justify-center rounded-xl",
+          iconBgClass[color],
+        ].join(" ")}
+      >
         <Icon size={17} weight="duotone" className={iconColorClass[color]} />
       </div>
       <div className="text-xs font-medium text-[rgb(var(--muted))]">{label}</div>
       {value === null ? (
         <div className="mt-1.5 h-6 w-20 animate-pulse rounded-md bg-[rgb(var(--surface-soft))]" />
       ) : (
-        <div className={["mt-1.5 text-xl font-semibold tracking-tight tabular-nums", valueColorClass[color]].join(" ")}>
+        <div
+          className={[
+            "mt-1.5 text-xl font-semibold tracking-tight tabular-nums",
+            valueColorClass[color],
+          ].join(" ")}
+        >
           {value}
         </div>
       )}

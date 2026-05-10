@@ -9,6 +9,8 @@ common:
   language: "Язык"
   theme: "Тема"
   logout: "Выйти"
+  darkMode: "Тёмная тема"
+  lightMode: "Светлая тема"
 
 landing:
   badge: "AI-first финансовое пространство"
@@ -38,20 +40,20 @@ navigation:
 
 chat:
   title: "LUCA Chat"
-  subtitle: "Расскажи LUCA, что произошло с деньгами."
-  placeholder: "Потратил $52 в Nobu вчера..."
-  intro: "Расскажи, что произошло с деньгами. Например: «Потратил $52 в Nobu вчера» или «Получил $1200 от клиента Alex»."
+  subtitle: "Твой AI CFO — спроси всё о своих финансах."
+  placeholder: "Расскажи, что произошло с деньгами..."
+  intro: "Спроси что-нибудь о финансах или расскажи о транзакции."
   thinking: "LUCA думает..."
-  confirmAndSave: "Подтвердить и сохранить"
-  saved: "Сохранено. Транзакция добавлена."
-  tryPrompts: "Попробуй"
+  confirmAndSave: "Подтвердить"
+  saved: "Сохранено"
   defaultAccount: "Основной счёт"
-  aiCommandCenter: "AI финансовый командный центр"
+  willAddTo: "Добавится в счёт"
   sessions: "История чатов"
   newChat: "Новый чат"
   reject: "Отклонить"
   noSessions: "Чатов пока нет"
   error: "Что-то пошло не так. Проверь, что API запущен."
+  confidence: "уверенность"
 
 dashboard:
   title: "Дашборд"
@@ -62,6 +64,8 @@ dashboard:
   savingsRate: "Норма накопления"
   topCategories: "Главные категории"
   noData: "Данных по расходам пока нет."
+  accounts: "Балансы счетов"
+  noAccounts: "Счетов пока нет."
 
 transactions:
   title: "Транзакции"
@@ -118,6 +122,14 @@ settings:
   addAccount: "Добавить счёт"
   accountName: "Название счёта"
   saved: "Сохранено"
+
+workspace:
+  switcher: "Воркспейсы"
+  new: "Новый воркспейс"
+  newName: "Название воркспейса"
+  personal: "личный"
+  business: "бизнес"
+  custom: "другой"
 
 accounts:
   title: "Счета"
