@@ -3,48 +3,55 @@
 import { apiFetch, getAuthToken } from "@/shared/api/client";
 import { useI18n } from "@/shared/i18n/i18n-provider";
 import { useLuca } from "@/shared/providers/luca-provider";
+import type {
+  AiOperation,
+  CreateAccountOp,
+  CreateCategoriesOp,
+  CreateGoalOp,
+  CreateTransactionsOp,
+  SetBudgetOp,
+} from "@/shared/api/types";
 import {
   ArrowUpIcon,
   BankIcon,
   CheckIcon,
+  FolderIcon,
+  SlidersIcon,
+  TargetIcon,
   XIcon,
 } from "@phosphor-icons/react/dist/ssr";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-type TxIntent = {
-  type: "INCOME" | "EXPENSE" | "TRANSFER";
-  amount: number;
-  currency: string;
-  categoryName?: string | null;
-  merchant?: string | null;
-  counterparty?: string | null;
-  comment?: string | null;
-  date?: string;
-  confidence: number;
-};
-
-type AiAction = {
+type ChatAction = {
   id: string;
-  payloadJson: {
-    intent?: string;
-    message?: string;
-    transactions: TxIntent[];
-  };
+  status: string;
+  operations: AiOperation[];
 };
 
 type Message = {
   id: string;
   role: "user" | "assistant";
   content: string;
-  action?: AiAction | null;
+  action?: ChatAction | null;
   confirmed?: boolean;
   rejected?: boolean;
   streaming?: boolean;
-  savedTxs?: TxIntent[];
+  savedOperations?: AiOperation[];
 };
 
 const INTRO_ID = "intro";
+
+/** Extract operations from payloadJson — supports both new (operations[]) and legacy (transactions[]) formats */
+function extractOperations(payloadJson: Record<string, unknown>): AiOperation[] {
+  if (Array.isArray(payloadJson.operations) && payloadJson.operations.length > 0) {
+    return payloadJson.operations as AiOperation[];
+  }
+  if (Array.isArray(payloadJson.transactions) && payloadJson.transactions.length > 0) {
+    return [{ type: "CREATE_TRANSACTIONS", transactions: payloadJson.transactions }] as AiOperation[];
+  }
+  return [];
+}
 
 export function ChatPageClient() {
   const { t, locale } = useI18n();
@@ -54,7 +61,7 @@ export function ChatPageClient() {
   const sessionId = searchParams.get("s");
 
   const [messages, setMessages] = useState<Message[]>([
-    { id: INTRO_ID, role: "assistant", content: t("chat.intro") }
+    { id: INTRO_ID, role: "assistant", content: t("chat.intro") },
   ]);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -89,26 +96,26 @@ export function ChatPageClient() {
         action?: {
           id: string;
           status: string;
-          payloadJson: AiAction["payloadJson"];
+          payloadJson: Record<string, unknown>;
         } | null;
       }>;
     }>(`/api/ai/chat/sessions/${sessionId}/messages`)
       .then((data) => {
-        const mapped: Message[] = data.messages.map((msg) => ({
-          id: msg.id,
-          role: msg.role === "USER" ? "user" : "assistant",
-          content: msg.content,
-          action:
-            msg.action && msg.action.status === "PENDING"
-              ? { id: msg.action.id, payloadJson: msg.action.payloadJson }
-              : null,
-          confirmed: msg.action?.status === "EXECUTED",
-          rejected: msg.action?.status === "REJECTED",
-          savedTxs:
-            msg.action?.status === "EXECUTED"
-              ? msg.action.payloadJson.transactions
-              : undefined,
-        }));
+        const mapped: Message[] = data.messages.map((msg) => {
+          const ops = msg.action ? extractOperations(msg.action.payloadJson) : [];
+          return {
+            id: msg.id,
+            role: msg.role === "USER" ? "user" : "assistant",
+            content: msg.content,
+            action:
+              msg.action && msg.action.status === "PENDING" && ops.length > 0
+                ? { id: msg.action.id, status: msg.action.status, operations: ops }
+                : null,
+            confirmed: msg.action?.status === "EXECUTED",
+            rejected: msg.action?.status === "REJECTED",
+            savedOperations: msg.action?.status === "EXECUTED" ? ops : undefined,
+          };
+        });
         setMessages(mapped);
       })
       .catch(console.error)
@@ -134,7 +141,7 @@ export function ChatPageClient() {
     setMessages((prev) => [
       ...prev,
       { id: userMsgId, role: "user", content: msg },
-      { id: assistantMsgId, role: "assistant", content: "", streaming: true }
+      { id: assistantMsgId, role: "assistant", content: "", streaming: true },
     ]);
 
     try {
@@ -143,9 +150,9 @@ export function ChatPageClient() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ workspaceId: workspace.id, sessionId, message: msg })
+        body: JSON.stringify({ workspaceId: workspace.id, sessionId, message: msg }),
       });
 
       if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
@@ -191,11 +198,11 @@ export function ChatPageClient() {
             );
           } else if (eventType === "action") {
             const actionId = payload.actionId as string;
-            const parsed = payload.parsed as AiAction["payloadJson"];
+            const operations = (payload.operations as AiOperation[]) ?? [];
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsgId
-                  ? { ...m, action: { id: actionId, payloadJson: parsed } }
+                  ? { ...m, action: { id: actionId, status: "PENDING", operations } }
                   : m
               )
             );
@@ -236,16 +243,16 @@ export function ChatPageClient() {
   }
 
   async function confirmAction(actionId: string) {
-    if (!defaultAccount) return;
-
     const action = messages.find((m) => m.action?.id === actionId)?.action;
-    const txs = action?.payloadJson.transactions ?? [];
+    const operations = action?.operations ?? [];
 
-    // Optimistic update
+    const hasTx = operations.some((op) => op.type === "CREATE_TRANSACTIONS");
+    if (hasTx && !defaultAccount) return;
+
     setMessages((prev) =>
       prev.map((m) =>
         m.action?.id === actionId
-          ? { ...m, confirmed: true, action: null, savedTxs: txs }
+          ? { ...m, confirmed: true, action: null, savedOperations: operations }
           : m
       )
     );
@@ -253,16 +260,15 @@ export function ChatPageClient() {
     try {
       await apiFetch(`/api/ai/actions/${actionId}/confirm`, {
         method: "POST",
-        body: JSON.stringify({ accountId: defaultAccount.id })
+        body: JSON.stringify({ accountId: defaultAccount?.id ?? null }),
       });
       reload();
     } catch (err) {
       console.error(err);
-      // Rollback on error
       setMessages((prev) =>
         prev.map((m) =>
-          m.confirmed && m.savedTxs === txs
-            ? { ...m, confirmed: false, action, savedTxs: undefined }
+          m.confirmed && m.savedOperations === operations
+            ? { ...m, confirmed: false, action, savedOperations: undefined }
             : m
         )
       );
@@ -270,13 +276,11 @@ export function ChatPageClient() {
   }
 
   async function rejectAction(actionId: string) {
-    // Optimistic update
     setMessages((prev) =>
       prev.map((m) =>
         m.action?.id === actionId ? { ...m, rejected: true, action: null } : m
       )
     );
-
     try {
       await apiFetch(`/api/ai/actions/${actionId}/reject`, { method: "POST" });
     } catch (err) {
@@ -291,7 +295,6 @@ export function ChatPageClient() {
           <Dots />
         </div>
       ) : !hasUserMessages ? (
-        /* Welcome screen */
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4">
           <h2 className="text-2xl font-semibold tracking-tight text-[rgb(var(--foreground))]">
             {locale === "ru" ? "Чем могу помочь?" : "How can I help?"}
@@ -301,7 +304,6 @@ export function ChatPageClient() {
           </p>
         </div>
       ) : (
-        /* Messages list */
         <div className="flex-1 overflow-y-auto thin-scrollbar">
           <div className="mx-auto max-w-2xl space-y-8 px-4 py-10 lg:px-6">
             {messages
@@ -322,7 +324,6 @@ export function ChatPageClient() {
         </div>
       )}
 
-      {/* Input */}
       <div className="shrink-0 bg-[rgb(var(--background))]">
         <div className="mx-auto max-w-2xl px-4 pb-5 pt-2 lg:px-6">
           <div className="rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-4 pb-3 pt-3.5 shadow-sm transition-colors focus-within:border-[rgb(var(--accent))]">
@@ -412,7 +413,6 @@ function MessageRow({
 
   return (
     <div className="space-y-3">
-      {/* Text content */}
       {message.content && (
         <p className="whitespace-pre-wrap text-sm leading-relaxed text-[rgb(var(--foreground))]">
           {message.content}
@@ -422,25 +422,30 @@ function MessageRow({
         </p>
       )}
 
-      {/* Pending action — confirmation required */}
+      {/* Pending confirmation */}
       {message.action && (
         <div className="space-y-2">
-          {message.action.payloadJson.transactions.map((tx, i) => (
-            <TxConfirmCard
+          {message.action.operations.length > 1 && (
+            <p className="text-xs font-medium text-[rgb(var(--muted))]">
+              {message.action.operations.length} {t("chat.operationsCount")}
+            </p>
+          )}
+          {message.action.operations.map((op, i) => (
+            <OperationConfirmCard
               key={i}
-              tx={tx}
+              op={op}
               accountName={defaultAccountName}
               t={t}
               locale={locale}
             />
           ))}
-          <div className="flex gap-2">
+          <div className="flex gap-2 pt-1">
             <button
               onClick={() => onConfirm(message.action!.id)}
               className="flex h-9 items-center gap-2 rounded-lg bg-[rgb(var(--foreground))] px-4 text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85 active:scale-[0.98]"
             >
               <CheckIcon size={12} weight="bold" />
-              {t("chat.confirmAndSave")}
+              {message.action.operations.length > 1 ? t("chat.confirmAll") : t("chat.confirmAndSave")}
             </button>
             <button
               onClick={() => onReject(message.action!.id)}
@@ -453,25 +458,111 @@ function MessageRow({
         </div>
       )}
 
-      {/* Confirmed — saved transactions */}
-      {message.confirmed && message.savedTxs && message.savedTxs.length > 0 && (
-        <div className="space-y-2">
-          {message.savedTxs.map((tx, i) => (
-            <TxSavedCard key={i} tx={tx} t={t} locale={locale} />
+      {/* Confirmed — saved state */}
+      {message.confirmed && message.savedOperations && message.savedOperations.length > 0 && (
+        <div className="space-y-1.5">
+          {message.savedOperations.map((op, i) => (
+            <OperationSavedCard key={i} op={op} t={t} locale={locale} />
           ))}
         </div>
       )}
 
-      {/* Rejected state */}
+      {/* Rejected */}
       {message.rejected && (
         <div className="flex items-center gap-2 rounded-xl border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] px-4 py-2.5 text-sm text-[rgb(var(--muted))]">
           <XIcon size={13} />
-          {locale === "ru" ? "Транзакция отклонена" : "Transaction rejected"}
+          {locale === "ru" ? "Отклонено" : "Rejected"}
         </div>
       )}
     </div>
   );
 }
+
+// ─── Operation confirm cards ──────────────────────────────────────────────────
+
+function OperationConfirmCard({
+  op,
+  accountName,
+  t,
+  locale,
+}: {
+  op: AiOperation;
+  accountName?: string;
+  t: (key: string) => string;
+  locale: string;
+}) {
+  switch (op.type) {
+    case "CREATE_TRANSACTIONS":
+      return (
+        <>
+          {(op as CreateTransactionsOp).transactions.map((tx, i) => (
+            <TxConfirmCard key={i} tx={tx} accountName={accountName} t={t} locale={locale} />
+          ))}
+        </>
+      );
+    case "CREATE_ACCOUNT":
+      return <AccountConfirmCard op={op as CreateAccountOp} t={t} />;
+    case "CREATE_CATEGORIES":
+      return <CategoriesConfirmCard op={op as CreateCategoriesOp} t={t} />;
+    case "SET_BUDGET":
+      return <BudgetConfirmCard op={op as SetBudgetOp} t={t} locale={locale} />;
+    case "CREATE_GOAL":
+      return <GoalConfirmCard op={op as CreateGoalOp} t={t} locale={locale} />;
+    default:
+      return null;
+  }
+}
+
+function OperationSavedCard({
+  op,
+  t,
+  locale,
+}: {
+  op: AiOperation;
+  t: (key: string) => string;
+  locale: string;
+}) {
+  switch (op.type) {
+    case "CREATE_TRANSACTIONS":
+      return (
+        <>
+          {(op as CreateTransactionsOp).transactions.map((tx, i) => (
+            <TxSavedCard key={i} tx={tx} t={t} locale={locale} />
+          ))}
+        </>
+      );
+    case "CREATE_ACCOUNT":
+      return <SimpleSavedCard icon={<BankIcon size={10} weight="bold" />} label={t("chat.accountSaved")} detail={(op as CreateAccountOp).name} />;
+    case "CREATE_CATEGORIES":
+      return (
+        <SimpleSavedCard
+          icon={<FolderIcon size={10} weight="bold" />}
+          label={t("chat.categoriesSaved")}
+          detail={(op as CreateCategoriesOp).categories.map((c) => c.name).join(", ")}
+        />
+      );
+    case "SET_BUDGET":
+      return (
+        <SimpleSavedCard
+          icon={<SlidersIcon size={10} weight="bold" />}
+          label={t("chat.budgetSaved")}
+          detail={`${(op as SetBudgetOp).categoryName} · ${(op as SetBudgetOp).amount.toLocaleString()} ${(op as SetBudgetOp).currency}`}
+        />
+      );
+    case "CREATE_GOAL":
+      return (
+        <SimpleSavedCard
+          icon={<TargetIcon size={10} weight="bold" />}
+          label={t("chat.goalSaved")}
+          detail={(op as CreateGoalOp).name}
+        />
+      );
+    default:
+      return null;
+  }
+}
+
+// ─── Individual card components ───────────────────────────────────────────────
 
 function formatDate(iso: string, locale: string): string {
   try {
@@ -491,7 +582,7 @@ function TxConfirmCard({
   t,
   locale,
 }: {
-  tx: TxIntent;
+  tx: CreateTransactionsOp["transactions"][number];
   accountName?: string;
   t: (key: string) => string;
   locale: string;
@@ -524,7 +615,9 @@ function TxConfirmCard({
       <div className="flex items-start justify-between gap-3 px-4 py-3">
         <div className="min-w-0">
           <div className={["text-lg font-semibold tabular-nums leading-tight", amountColor].join(" ")}>
-            {sign}{tx.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {tx.currency}
+            {sign}
+            {tx.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
+            {tx.currency}
           </div>
           {(tx.merchant || tx.counterparty) && (
             <div className="mt-0.5 text-sm font-medium text-[rgb(var(--foreground))]">
@@ -554,7 +647,155 @@ function TxConfirmCard({
           </>
         )}
         <span className="opacity-40">·</span>
-        <span>{Math.round(tx.confidence * 100)}% {t("chat.confidence")}</span>
+        <span>
+          {Math.round(tx.confidence * 100)}% {t("chat.confidence")}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function AccountConfirmCard({ op, t }: { op: CreateAccountOp; t: (key: string) => string }) {
+  const typeLabel: Record<string, string> = {
+    CASH: "Cash",
+    CARD: "Card",
+    BANK: "Bank",
+    WISE: "Wise",
+    PAYPAL: "PayPal",
+    CRYPTO: "Crypto",
+    OTHER: "Other",
+  };
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[rgb(var(--surface-soft))]">
+          <BankIcon size={16} className="text-[rgb(var(--muted))]" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="font-medium text-[rgb(var(--foreground))]">{op.name}</div>
+          <div className="text-xs text-[rgb(var(--muted))]">
+            {typeLabel[op.accountType] ?? op.accountType} · {op.currency}
+            {op.isDebt && <span className="ml-1.5 text-[rgb(var(--negative))]">({t("chat.debtAccount")})</span>}
+          </div>
+        </div>
+        <span className="shrink-0 rounded-full bg-[rgb(var(--surface-soft))] px-2.5 py-0.5 text-xs font-medium text-[rgb(var(--muted))]">
+          {t("chat.createAccount")}
+        </span>
+      </div>
+      {op.initialBalance !== 0 && (
+        <div className="border-t border-[rgb(var(--border-soft))] px-4 py-2 text-[11px] text-[rgb(var(--muted))]">
+          {t("chat.initialBalance")}: {op.initialBalance.toLocaleString()} {op.currency}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CategoriesConfirmCard({ op, t }: { op: CreateCategoriesOp; t: (key: string) => string }) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[rgb(var(--surface-soft))]">
+          <FolderIcon size={16} className="text-[rgb(var(--muted))]" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="font-medium text-[rgb(var(--foreground))]">
+            {op.categories.length === 1
+              ? op.categories[0].name
+              : `${op.categories.length} ${t("chat.createCategories").toLowerCase()}`}
+          </div>
+          <div className="text-xs text-[rgb(var(--muted))]">
+            {op.categories.map((c) => `${c.icon ? c.icon + " " : ""}${c.name}`).join(", ")}
+          </div>
+        </div>
+        <span className="shrink-0 rounded-full bg-[rgb(var(--surface-soft))] px-2.5 py-0.5 text-xs font-medium text-[rgb(var(--muted))]">
+          {t("chat.createCategories")}
+        </span>
+      </div>
+      <div className="flex gap-2 border-t border-[rgb(var(--border-soft))] px-4 py-2">
+        {op.categories.map((c, i) => (
+          <span
+            key={i}
+            className={[
+              "rounded-full px-2 py-0.5 text-[11px] font-medium",
+              c.categoryType === "EXPENSE"
+                ? "bg-[rgb(var(--negative-dim))] text-[rgb(var(--negative))]"
+                : "bg-[rgb(var(--positive-dim))] text-[rgb(var(--positive))]",
+            ].join(" ")}
+          >
+            {c.icon ? `${c.icon} ` : ""}{c.name}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BudgetConfirmCard({
+  op,
+  t,
+  locale,
+}: {
+  op: SetBudgetOp;
+  t: (key: string) => string;
+  locale: string;
+}) {
+  const periodLabel: Record<string, string> =
+    locale === "ru"
+      ? { MONTHLY: "ежемесячно", QUARTERLY: "ежеквартально", YEARLY: "ежегодно" }
+      : { MONTHLY: "monthly", QUARTERLY: "quarterly", YEARLY: "yearly" };
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[rgb(var(--surface-soft))]">
+          <SlidersIcon size={16} className="text-[rgb(var(--muted))]" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="font-medium text-[rgb(var(--foreground))]">
+            {op.amount.toLocaleString()} {op.currency}
+          </div>
+          <div className="text-xs text-[rgb(var(--muted))]">
+            {t("chat.budgetFor")} {op.categoryName} · {periodLabel[op.period] ?? op.period}
+          </div>
+        </div>
+        <span className="shrink-0 rounded-full bg-[rgb(var(--surface-soft))] px-2.5 py-0.5 text-xs font-medium text-[rgb(var(--muted))]">
+          {t("chat.setBudget")}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function GoalConfirmCard({
+  op,
+  t,
+  locale,
+}: {
+  op: CreateGoalOp;
+  t: (key: string) => string;
+  locale: string;
+}) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[rgb(var(--surface-soft))]">
+          <TargetIcon size={16} className="text-[rgb(var(--muted))]" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="font-medium text-[rgb(var(--foreground))]">{op.name}</div>
+          <div className="text-xs text-[rgb(var(--muted))]">
+            {t("chat.targetAmount")}: {op.targetAmount.toLocaleString()} {op.currency}
+            {op.deadline && (
+              <span className="ml-2">· {formatDate(op.deadline, locale)}</span>
+            )}
+            {!op.deadline && <span className="ml-2">· {t("chat.noDeadline")}</span>}
+          </div>
+        </div>
+        <span className="shrink-0 rounded-full bg-[rgb(var(--surface-soft))] px-2.5 py-0.5 text-xs font-medium text-[rgb(var(--muted))]">
+          {t("chat.createGoal")}
+        </span>
       </div>
     </div>
   );
@@ -565,7 +806,7 @@ function TxSavedCard({
   t,
   locale,
 }: {
-  tx: TxIntent;
+  tx: CreateTransactionsOp["transactions"][number];
   t: (key: string) => string;
   locale: string;
 }) {
@@ -585,10 +826,16 @@ function TxSavedCard({
       </div>
       <div className="min-w-0 flex-1">
         <div className={["text-sm font-semibold tabular-nums", amountColor].join(" ")}>
-          {sign}{tx.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {tx.currency}
+          {sign}
+          {tx.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
+          {tx.currency}
         </div>
         <div className="truncate text-[11px] text-[rgb(var(--muted))]">
-          {[tx.merchant || tx.counterparty, tx.categoryName, tx.date ? formatDate(tx.date, locale) : null]
+          {[
+            tx.merchant || tx.counterparty,
+            tx.categoryName,
+            tx.date ? formatDate(tx.date, locale) : null,
+          ]
             .filter(Boolean)
             .join(" · ")}
         </div>
@@ -596,6 +843,28 @@ function TxSavedCard({
       <span className="shrink-0 text-xs font-medium text-[rgb(var(--positive))]">
         {t("chat.saved")}
       </span>
+    </div>
+  );
+}
+
+function SimpleSavedCard({
+  icon,
+  label,
+  detail,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  detail: string;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] px-4 py-2.5">
+      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[rgb(var(--positive))]">
+        <span className="text-white">{icon}</span>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium text-[rgb(var(--foreground))]">{detail}</div>
+      </div>
+      <span className="shrink-0 text-xs font-medium text-[rgb(var(--positive))]">{label}</span>
     </div>
   );
 }

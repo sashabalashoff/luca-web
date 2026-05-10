@@ -51,21 +51,80 @@ export type Transaction = {
   } | null;
 };
 
+// ─── AI Operation types (mirrors server/ai/parser.ts) ────────────────────────
+
+export type ParsedTransaction = {
+  type: "INCOME" | "EXPENSE" | "TRANSFER";
+  amount: number;
+  currency: string;
+  categoryName?: string | null;
+  merchant?: string | null;
+  counterparty?: string | null;
+  comment?: string | null;
+  date: string;
+  confidence: number;
+};
+
+export type CreateTransactionsOp = {
+  type: "CREATE_TRANSACTIONS";
+  transactions: ParsedTransaction[];
+};
+
+export type CreateAccountOp = {
+  type: "CREATE_ACCOUNT";
+  name: string;
+  accountType: "CASH" | "CARD" | "BANK" | "WISE" | "PAYPAL" | "CRYPTO" | "OTHER";
+  currency: string;
+  initialBalance: number;
+  isDebt: boolean;
+};
+
+export type CreateCategoriesOp = {
+  type: "CREATE_CATEGORIES";
+  categories: Array<{
+    name: string;
+    categoryType: "INCOME" | "EXPENSE";
+    icon?: string | null;
+    color?: string | null;
+  }>;
+};
+
+export type SetBudgetOp = {
+  type: "SET_BUDGET";
+  categoryName: string;
+  amount: number;
+  currency: string;
+  period: "MONTHLY" | "QUARTERLY" | "YEARLY";
+};
+
+export type CreateGoalOp = {
+  type: "CREATE_GOAL";
+  name: string;
+  targetAmount: number;
+  currency: string;
+  deadline?: string | null;
+};
+
+export type AiOperation =
+  | CreateTransactionsOp
+  | CreateAccountOp
+  | CreateCategoriesOp
+  | SetBudgetOp
+  | CreateGoalOp;
+
 export type AiAction = {
   id: string;
+  status: string;
   payloadJson: {
-    transactions: Array<{
-      type: "INCOME" | "EXPENSE" | "TRANSFER";
-      amount: number;
-      currency: string;
-      categoryName?: string | null;
-      merchant?: string | null;
-      counterparty?: string | null;
-      comment?: string | null;
-      confidence: number;
-    }>;
+    intent?: string;
+    message?: string;
+    operations?: AiOperation[];
+    // Legacy field
+    transactions?: ParsedTransaction[];
   };
 };
+
+// ─── Reports ────────────────────────────────────────────────────────────────
 
 export type MonthlySummary = {
   period: { start: string; end: string };
