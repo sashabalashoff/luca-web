@@ -53,11 +53,20 @@ export function DashboardPageClient() {
 
   useEffect(() => {
     if (!workspace) return;
-    setLoading(true);
-    apiFetch<Summary>(`/api/reports/monthly-summary?workspaceId=${workspace.id}`)
-      .then(setSummary)
-      .catch(console.error)
-      .finally(() => setLoading(false));
+    let active = true;
+    async function fetchData() {
+      if (active) setLoading(true);
+      try {
+        const data = await apiFetch<Summary>(`/api/reports/monthly-summary?workspaceId=${workspace!.id}`);
+        if (active) setSummary(data);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+    fetchData();
+    return () => { active = false; };
   }, [workspace]);
 
   const currency = workspace?.baseCurrency ?? "USD";

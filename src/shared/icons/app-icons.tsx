@@ -3,6 +3,7 @@
 import {
   ArrowRightIcon,
   BankIcon,
+  ChartBarIcon,
   ChartDonutIcon,
   ChartLineUpIcon,
   ChatCircleTextIcon,
@@ -17,6 +18,7 @@ import {
   SignOutIcon,
   SparkleIcon,
   SunDimIcon,
+  TagIcon,
   TargetIcon,
   WalletIcon
 } from "@phosphor-icons/react/dist/ssr";
@@ -44,5 +46,8 @@ export const AppIcons = {
   dashboard: ChartLineUpIcon,
   reports: ChartDonutIcon,
   goals: TargetIcon,
-  settings: GearSixIcon
+  settings: GearSixIcon,
+  accounts: BankIcon,
+  categories: TagIcon,
+  budget: ChartBarIcon
 };

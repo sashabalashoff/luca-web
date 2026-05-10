@@ -9,9 +9,24 @@ export type Account = {
   id: string;
   workspaceId: string;
   name: string;
-  type: string;
+  type: "CASH" | "CARD" | "BANK" | "WISE" | "PAYPAL" | "CRYPTO" | "OTHER";
   currency: string;
+  initialBalance: string;
   currentBalance: string;
+  creditLimit?: string | null;
+  isDebt: boolean;
+  isArchived: boolean;
+};
+
+export type Category = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  type: "INCOME" | "EXPENSE" | "TRANSFER";
+  icon?: string | null;
+  color?: string | null;
+  isDefault: boolean;
+  parentId?: string | null;
 };
 
 export type Transaction = {
@@ -29,6 +44,10 @@ export type Transaction = {
     name: string;
     icon?: string | null;
     color?: string | null;
+  } | null;
+  account?: {
+    id: string;
+    name: string;
   } | null;
 };
 
@@ -49,6 +68,7 @@ export type AiAction = {
 };
 
 export type MonthlySummary = {
+  period: { start: string; end: string };
   income: number;
   expenses: number;
   net: number;
@@ -57,4 +77,24 @@ export type MonthlySummary = {
     name: string;
     amount: number;
   }>;
+};
+
+export type BudgetPeriod = "MONTHLY" | "QUARTERLY" | "YEARLY";
+
+export type Budget = {
+  id: string;
+  workspaceId: string;
+  categoryId?: string | null;
+  period: BudgetPeriod;
+  year: number;
+  month?: number | null;
+  amount: string;
+  currency: string;
+  category?: {
+    id: string;
+    name: string;
+    type: string;
+    icon?: string | null;
+    color?: string | null;
+  } | null;
 };

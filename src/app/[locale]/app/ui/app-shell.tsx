@@ -1,18 +1,22 @@
 "use client";
 
+import { apiFetch } from "@/shared/api/client";
 import { useI18n } from "@/shared/i18n/i18n-provider";
 import { AppIcons } from "@/shared/icons/app-icons";
 import { createSupabaseBrowserClient } from "@/shared/lib/supabase/client";
 import { LucaProvider, useLuca } from "@/shared/providers/luca-provider";
-import { ListIcon, XIcon } from "@phosphor-icons/react/dist/ssr";
+import { ListIcon, PlusIcon, XIcon } from "@phosphor-icons/react/dist/ssr";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 
 const nav = [
   { href: "/app",               labelKey: "navigation.chat",         icon: AppIcons.chat },
   { href: "/app/dashboard",     labelKey: "navigation.dashboard",    icon: AppIcons.dashboard },
   { href: "/app/transactions",  labelKey: "navigation.transactions", icon: AppIcons.transactions },
+  { href: "/app/accounts",      labelKey: "navigation.accounts",     icon: AppIcons.accounts },
+  { href: "/app/categories",    labelKey: "navigation.categories",   icon: AppIcons.categories },
+  { href: "/app/budget",        labelKey: "navigation.budget",       icon: AppIcons.budget },
   { href: "/app/reports",       labelKey: "navigation.reports",      icon: AppIcons.reports },
   { href: "/app/goals",         labelKey: "navigation.goals",        icon: AppIcons.goals },
   { href: "/app/settings",      labelKey: "navigation.settings",     icon: AppIcons.settings }
@@ -33,7 +37,7 @@ function SidebarNav({ locale, onNavigate }: { locale: string; onNavigate?: () =>
   const { t } = useI18n();
 
   return (
-    <nav className="flex-1 overflow-y-auto px-2 py-1 no-scrollbar">
+    <nav className="shrink-0 px-2 py-1">
       <div className="space-y-px">
         {nav.map((item) => {
           const Icon = item.icon;
@@ -59,6 +63,78 @@ function SidebarNav({ locale, onNavigate }: { locale: string; onNavigate?: () =>
         })}
       </div>
     </nav>
+  );
+}
+
+type ChatSession = {
+  id: string;
+  title: string;
+  updatedAt: string;
+};
+
+function ChatSessionsList({ locale, onNavigate }: { locale: string; onNavigate?: () => void }) {
+  const { t } = useI18n();
+  const { workspace } = useLuca();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const activeSessionId = searchParams.get("s");
+  const isChatRoute = pathname === `/${locale}/app`;
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+
+  useEffect(() => {
+    if (!workspace || !isChatRoute) return;
+    apiFetch<{ sessions: ChatSession[] }>(
+      `/api/ai/chat/sessions?workspaceId=${workspace.id}`
+    )
+      .then((r) => setSessions(r.sessions))
+      .catch(console.error);
+  }, [workspace, isChatRoute, activeSessionId]);
+
+  if (!isChatRoute) {
+    return <div className="flex-1" />;
+  }
+
+  return (
+    <div className="flex flex-1 flex-col overflow-hidden border-t border-[rgb(var(--border-soft))] px-2 py-2">
+      <div className="mb-1.5 flex items-center justify-between px-3">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-[rgb(var(--muted-soft))]">
+          {t("chat.sessions")}
+        </span>
+        <Link
+          href={`/${locale}/app`}
+          onClick={onNavigate}
+          className="flex h-5 w-5 items-center justify-center rounded-md text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
+          title={t("chat.newChat")}
+        >
+          <PlusIcon size={11} weight="bold" />
+        </Link>
+      </div>
+
+      <div className="flex-1 overflow-y-auto no-scrollbar space-y-px">
+        {sessions.length === 0 ? (
+          <p className="px-3 py-1 text-xs text-[rgb(var(--muted-soft))]">{t("chat.noSessions")}</p>
+        ) : (
+          sessions.map((session) => {
+            const isActive = session.id === activeSessionId;
+            return (
+              <Link
+                key={session.id}
+                href={`/${locale}/app?s=${session.id}`}
+                onClick={onNavigate}
+                className={[
+                  "block truncate rounded-lg px-3 py-[6px] text-xs transition-colors duration-100",
+                  isActive
+                    ? "bg-[rgb(var(--surface-soft))] font-medium text-[rgb(var(--foreground))]"
+                    : "text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
+                ].join(" ")}
+              >
+                {session.title || t("chat.newChat")}
+              </Link>
+            );
+          })
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -108,6 +184,9 @@ function Sidebar({ locale }: { locale: string }) {
         </Link>
       </div>
       <SidebarNav locale={locale} />
+      <Suspense fallback={<div className="flex-1" />}>
+        <ChatSessionsList locale={locale} />
+      </Suspense>
       <SidebarFooter locale={locale} />
     </aside>
   );
@@ -153,6 +232,9 @@ function MobileSidebar({
           </button>
         </div>
         <SidebarNav locale={locale} onNavigate={onClose} />
+        <Suspense fallback={<div className="flex-1" />}>
+          <ChatSessionsList locale={locale} onNavigate={onClose} />
+        </Suspense>
         <SidebarFooter locale={locale} />
       </aside>
     </>
