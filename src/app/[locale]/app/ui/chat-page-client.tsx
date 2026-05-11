@@ -10,12 +10,14 @@ import type {
   CreateGoalOp,
   CreateTransactionsOp,
   SetBudgetOp,
+  ParsedTransaction,
 } from "@/shared/api/types";
 import {
   ArrowUpIcon,
   BankIcon,
   CheckIcon,
   FolderIcon,
+  PencilSimpleIcon,
   SlidersIcon,
   TargetIcon,
   XIcon,
@@ -23,10 +25,24 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+type TransactionOverride = {
+  accountId?: string;
+  toAccountId?: string | null;
+  categoryId?: string | null;
+  amount?: number;
+  currency?: string;
+  date?: string;
+  merchant?: string | null;
+  comment?: string | null;
+};
+
 type ChatAction = {
   id: string;
   status: string;
   operations: AiOperation[];
+  overrides?: TransactionOverride[];
 };
 
 type Message = {
@@ -42,7 +58,6 @@ type Message = {
 
 const INTRO_ID = "intro";
 
-/** Extract operations from payloadJson — supports both new (operations[]) and legacy (transactions[]) formats */
 function extractOperations(payloadJson: Record<string, unknown>): AiOperation[] {
   if (Array.isArray(payloadJson.operations) && payloadJson.operations.length > 0) {
     return payloadJson.operations as AiOperation[];
@@ -53,9 +68,11 @@ function extractOperations(payloadJson: Record<string, unknown>): AiOperation[] 
   return [];
 }
 
+// ─── Main component ───────────────────────────────────────────────────────────
+
 export function ChatPageClient() {
   const { t, locale } = useI18n();
-  const { workspace, defaultAccount, isLoading, reload } = useLuca();
+  const { workspace, accounts, defaultAccount, isLoading, reload } = useLuca();
   const router = useRouter();
   const searchParams = useSearchParams();
   const sessionId = searchParams.get("s");
@@ -77,13 +94,17 @@ export function ChatPageClient() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isSending]);
 
-  useEffect(() => {
-    if (!workspace) return;
-
+  // When sessionId disappears (user starts new chat), reset to intro — React derived-state pattern
+  const [trackedSessionId, setTrackedSessionId] = useState(sessionId);
+  if (trackedSessionId !== sessionId) {
+    setTrackedSessionId(sessionId);
     if (!sessionId) {
       setMessages([{ id: INTRO_ID, role: "assistant", content: t("chat.intro") }]);
-      return;
     }
+  }
+
+  useEffect(() => {
+    if (!workspace || !sessionId) return;
 
     if (sessionWasCreatedByUs.current.has(sessionId)) return;
 
@@ -199,10 +220,14 @@ export function ChatPageClient() {
           } else if (eventType === "action") {
             const actionId = payload.actionId as string;
             const operations = (payload.operations as AiOperation[]) ?? [];
+
+            // Build initial overrides: pre-select account based on AI's accountName hint
+            const overrides = buildInitialOverrides(operations, accounts, defaultAccount?.id);
+
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsgId
-                  ? { ...m, action: { id: actionId, status: "PENDING", operations } }
+                  ? { ...m, action: { id: actionId, status: "PENDING", operations, overrides } }
                   : m
               )
             );
@@ -243,8 +268,12 @@ export function ChatPageClient() {
   }
 
   async function confirmAction(actionId: string) {
-    const action = messages.find((m) => m.action?.id === actionId)?.action;
-    const operations = action?.operations ?? [];
+    const msg = messages.find((m) => m.action?.id === actionId);
+    const action = msg?.action;
+    if (!action) return;
+
+    const operations = action.operations ?? [];
+    const overrides = action.overrides ?? [];
 
     const hasTx = operations.some((op) => op.type === "CREATE_TRANSACTIONS");
     if (hasTx && !defaultAccount) return;
@@ -260,7 +289,10 @@ export function ChatPageClient() {
     try {
       await apiFetch(`/api/ai/actions/${actionId}/confirm`, {
         method: "POST",
-        body: JSON.stringify({ accountId: defaultAccount?.id ?? null }),
+        body: JSON.stringify({
+          accountId: defaultAccount?.id ?? null,
+          transactionOverrides: overrides,
+        }),
       });
       reload();
     } catch (err) {
@@ -288,6 +320,17 @@ export function ChatPageClient() {
     }
   }
 
+  function updateOverride(actionId: string, txIndex: number, patch: Partial<TransactionOverride>) {
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.action?.id !== actionId) return m;
+        const overrides = [...(m.action.overrides ?? [])];
+        overrides[txIndex] = { ...(overrides[txIndex] ?? {}), ...patch };
+        return { ...m, action: { ...m.action, overrides } };
+      })
+    );
+  }
+
   return (
     <div className="absolute inset-0 flex flex-col overflow-hidden">
       {historyLoading ? (
@@ -312,9 +355,11 @@ export function ChatPageClient() {
                 <MessageRow
                   key={message.id}
                   message={message}
-                  defaultAccountName={defaultAccount?.name}
+                  accounts={accounts}
+                  defaultAccount={defaultAccount}
                   onConfirm={confirmAction}
                   onReject={rejectAction}
+                  onUpdateOverride={updateOverride}
                   t={t}
                   locale={locale}
                 />
@@ -364,6 +409,41 @@ export function ChatPageClient() {
   );
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function buildInitialOverrides(
+  operations: AiOperation[],
+  accounts: { id: string; name: string }[],
+  defaultAccountId?: string
+): TransactionOverride[] {
+  const overrides: TransactionOverride[] = [];
+  for (const op of operations) {
+    if (op.type !== "CREATE_TRANSACTIONS") continue;
+    for (const tx of (op as CreateTransactionsOp).transactions) {
+      let accountId = defaultAccountId;
+      if (tx.accountName) {
+        const lower = tx.accountName.toLowerCase();
+        const match = accounts.find(
+          (a) => a.name.toLowerCase().includes(lower) || lower.includes(a.name.toLowerCase())
+        );
+        if (match) accountId = match.id;
+      }
+
+      // For transfers, pre-select a different account as the destination
+      let toAccountId: string | undefined;
+      if (tx.type === "TRANSFER" && accounts.length > 1) {
+        const other = accounts.find((a) => a.id !== accountId);
+        toAccountId = other?.id;
+      }
+
+      overrides.push({ accountId, toAccountId });
+    }
+  }
+  return overrides;
+}
+
+// ─── Loading dots ─────────────────────────────────────────────────────────────
+
 function Dots() {
   return (
     <div className="flex gap-1.5">
@@ -378,18 +458,24 @@ function Dots() {
   );
 }
 
+// ─── Message row ──────────────────────────────────────────────────────────────
+
 function MessageRow({
   message,
-  defaultAccountName,
+  accounts,
+  defaultAccount,
   onConfirm,
   onReject,
+  onUpdateOverride,
   t,
   locale,
 }: {
   message: Message;
-  defaultAccountName?: string;
+  accounts: { id: string; name: string; currency: string }[];
+  defaultAccount: { id: string; name: string } | null;
   onConfirm: (id: string) => void;
   onReject: (id: string) => void;
+  onUpdateOverride: (actionId: string, txIndex: number, patch: Partial<TransactionOverride>) => void;
   t: (key: string) => string;
   locale: string;
 }) {
@@ -411,6 +497,9 @@ function MessageRow({
     );
   }
 
+  // Build flat index for overrides across all tx operations
+  let txOverrideIndex = 0;
+
   return (
     <div className="space-y-3">
       {message.content && (
@@ -430,15 +519,34 @@ function MessageRow({
               {message.action.operations.length} {t("chat.operationsCount")}
             </p>
           )}
-          {message.action.operations.map((op, i) => (
-            <OperationConfirmCard
-              key={i}
-              op={op}
-              accountName={defaultAccountName}
-              t={t}
-              locale={locale}
-            />
-          ))}
+          {message.action.operations.map((op, opIdx) => {
+            if (op.type === "CREATE_TRANSACTIONS") {
+              const txOp = op as CreateTransactionsOp;
+              return txOp.transactions.map((tx, txIdx) => {
+                const idx = txOverrideIndex++;
+                const override = message.action!.overrides?.[idx];
+                return (
+                  <TxConfirmCard
+                    key={`${opIdx}-${txIdx}`}
+                    tx={tx}
+                    override={override}
+                    accounts={accounts}
+                    onUpdateOverride={(patch) => onUpdateOverride(message.action!.id, idx, patch)}
+                    t={t}
+                    locale={locale}
+                  />
+                );
+              });
+            }
+            return (
+              <OperationConfirmCard
+                key={opIdx}
+                op={op}
+                t={t}
+                locale={locale}
+              />
+            );
+          })}
           <div className="flex gap-2 pt-1">
             <button
               onClick={() => onConfirm(message.action!.id)}
@@ -458,7 +566,7 @@ function MessageRow({
         </div>
       )}
 
-      {/* Confirmed — saved state */}
+      {/* Confirmed */}
       {message.confirmed && message.savedOperations && message.savedOperations.length > 0 && (
         <div className="space-y-1.5">
           {message.savedOperations.map((op, i) => (
@@ -478,28 +586,209 @@ function MessageRow({
   );
 }
 
-// ─── Operation confirm cards ──────────────────────────────────────────────────
+// ─── Editable Transaction Confirm Card ───────────────────────────────────────
+
+const COMMON_CURRENCIES = ["USD", "EUR", "RUB", "GBP", "AED", "CNY", "JPY", "TRY", "KZT", "UAH", "BTC", "ETH"];
+
+function TxConfirmCard({
+  tx,
+  override,
+  accounts,
+  onUpdateOverride,
+  t,
+  locale,
+}: {
+  tx: ParsedTransaction;
+  override?: TransactionOverride;
+  accounts: { id: string; name: string; currency: string }[];
+  onUpdateOverride: (patch: Partial<TransactionOverride>) => void;
+  t: (key: string) => string;
+  locale: string;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+
+  const effectiveAmount = override?.amount ?? tx.amount;
+  const effectiveCurrency = override?.currency ?? tx.currency;
+  const effectiveDate = override?.date ?? tx.date;
+  const effectiveAccountId = override?.accountId ?? accounts[0]?.id;
+
+  const isExpense = tx.type === "EXPENSE";
+  const isIncome = tx.type === "INCOME";
+
+  const amountColor = isExpense
+    ? "text-[rgb(var(--negative))]"
+    : isIncome
+      ? "text-[rgb(var(--positive))]"
+      : "text-[rgb(var(--foreground))]";
+
+  const badgeBg = isExpense
+    ? "bg-[rgb(var(--negative-dim))] text-[rgb(var(--negative))]"
+    : isIncome
+      ? "bg-[rgb(var(--positive-dim))] text-[rgb(var(--positive))]"
+      : "bg-[rgb(var(--surface-soft))] text-[rgb(var(--muted))]";
+
+  const typeLabel = isExpense
+    ? t("transactions.expense")
+    : isIncome
+      ? t("transactions.income")
+      : t("transactions.transfer");
+
+  const sign = isExpense ? "−" : isIncome ? "+" : "";
+
+  const selectedAccount = accounts.find((a) => a.id === effectiveAccountId) ?? accounts[0];
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
+      {/* Main row */}
+      <div className="flex items-start justify-between gap-3 px-4 py-3">
+        <div className="min-w-0 flex-1">
+          <div className={["text-lg font-semibold tabular-nums leading-tight", amountColor].join(" ")}>
+            {sign}
+            {effectiveAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
+            {effectiveCurrency}
+          </div>
+          {(tx.merchant || tx.counterparty) && (
+            <div className="mt-0.5 text-sm font-medium text-[rgb(var(--foreground))]">
+              {tx.merchant || tx.counterparty}
+            </div>
+          )}
+          {tx.categoryName && (
+            <div className="text-xs text-[rgb(var(--muted))]">{tx.categoryName}</div>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className={["rounded-full px-2.5 py-0.5 text-xs font-medium", badgeBg].join(" ")}>
+            {typeLabel}
+          </span>
+          <button
+            onClick={() => setIsEditing((v) => !v)}
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
+            title={locale === "ru" ? "Редактировать" : "Edit"}
+          >
+            <PencilSimpleIcon size={13} weight="bold" />
+          </button>
+        </div>
+      </div>
+
+      {/* Meta row */}
+      <div className="flex flex-wrap items-center gap-3 border-t border-[rgb(var(--border-soft))] px-4 py-2 text-[11px] text-[rgb(var(--muted))]">
+        {effectiveDate && <span>{formatDate(effectiveDate, locale)}</span>}
+        {selectedAccount && (
+          <>
+            <span className="opacity-40">·</span>
+            <span className="flex items-center gap-1">
+              <BankIcon size={10} />
+              {selectedAccount.name}
+            </span>
+          </>
+        )}
+        <span className="opacity-40">·</span>
+        <span>{Math.round(tx.confidence * 100)}% {t("chat.confidence")}</span>
+      </div>
+
+      {/* Edit panel */}
+      {isEditing && (
+        <div className="border-t border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] p-4 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[rgb(var(--muted))]">
+                {t("transactions.amount")}
+              </label>
+              <input
+                type="number"
+                min="0.01"
+                step="any"
+                value={override?.amount ?? tx.amount}
+                onChange={(e) => onUpdateOverride({ amount: parseFloat(e.target.value) || tx.amount })}
+                className="h-8 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2.5 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[rgb(var(--muted))]">
+                {locale === "ru" ? "Валюта" : "Currency"}
+              </label>
+              <select
+                value={override?.currency ?? tx.currency}
+                onChange={(e) => onUpdateOverride({ currency: e.target.value })}
+                className="h-8 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+              >
+                {COMMON_CURRENCIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+                {!COMMON_CURRENCIES.includes(tx.currency) && (
+                  <option value={tx.currency}>{tx.currency}</option>
+                )}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[rgb(var(--muted))]">
+                {t("transactions.dateLabel")}
+              </label>
+              <input
+                type="date"
+                value={(override?.date ?? tx.date).slice(0, 10)}
+                onChange={(e) => onUpdateOverride({ date: e.target.value })}
+                className="h-8 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2.5 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+              />
+            </div>
+            {accounts.length > 0 && (
+              <div>
+                <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[rgb(var(--muted))]">
+                  {tx.type === "TRANSFER"
+                    ? (locale === "ru" ? "Счёт (откуда)" : "From account")
+                    : (locale === "ru" ? "Счёт" : "Account")}
+                </label>
+                <select
+                  value={effectiveAccountId ?? ""}
+                  onChange={(e) => onUpdateOverride({ accountId: e.target.value })}
+                  className="h-8 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+                >
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name} ({a.currency})</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          {tx.type === "TRANSFER" && accounts.length > 1 && (
+            <div>
+              <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[rgb(var(--muted))]">
+                {locale === "ru" ? "Счёт (куда)" : "To account"}
+              </label>
+              <select
+                value={override?.toAccountId ?? ""}
+                onChange={(e) => onUpdateOverride({ toAccountId: e.target.value || null })}
+                className="h-8 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+              >
+                <option value="">— {locale === "ru" ? "выберите счёт" : "select account"} —</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>{a.name} ({a.currency})</option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Other confirm cards ──────────────────────────────────────────────────────
 
 function OperationConfirmCard({
   op,
-  accountName,
   t,
   locale,
 }: {
   op: AiOperation;
-  accountName?: string;
   t: (key: string) => string;
   locale: string;
 }) {
   switch (op.type) {
-    case "CREATE_TRANSACTIONS":
-      return (
-        <>
-          {(op as CreateTransactionsOp).transactions.map((tx, i) => (
-            <TxConfirmCard key={i} tx={tx} accountName={accountName} t={t} locale={locale} />
-          ))}
-        </>
-      );
     case "CREATE_ACCOUNT":
       return <AccountConfirmCard op={op as CreateAccountOp} t={t} />;
     case "CREATE_CATEGORIES":
@@ -576,94 +865,9 @@ function formatDate(iso: string, locale: string): string {
   }
 }
 
-function TxConfirmCard({
-  tx,
-  accountName,
-  t,
-  locale,
-}: {
-  tx: CreateTransactionsOp["transactions"][number];
-  accountName?: string;
-  t: (key: string) => string;
-  locale: string;
-}) {
-  const isExpense = tx.type === "EXPENSE";
-  const isIncome = tx.type === "INCOME";
-
-  const amountColor = isExpense
-    ? "text-[rgb(var(--negative))]"
-    : isIncome
-      ? "text-[rgb(var(--positive))]"
-      : "text-[rgb(var(--foreground))]";
-
-  const badgeBg = isExpense
-    ? "bg-[rgb(var(--negative-dim))] text-[rgb(var(--negative))]"
-    : isIncome
-      ? "bg-[rgb(var(--positive-dim))] text-[rgb(var(--positive))]"
-      : "bg-[rgb(var(--surface-soft))] text-[rgb(var(--muted))]";
-
-  const typeLabel = isExpense
-    ? t("transactions.expense")
-    : isIncome
-      ? t("transactions.income")
-      : t("transactions.transfer");
-
-  const sign = isExpense ? "−" : isIncome ? "+" : "";
-
-  return (
-    <div className="overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
-      <div className="flex items-start justify-between gap-3 px-4 py-3">
-        <div className="min-w-0">
-          <div className={["text-lg font-semibold tabular-nums leading-tight", amountColor].join(" ")}>
-            {sign}
-            {tx.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
-            {tx.currency}
-          </div>
-          {(tx.merchant || tx.counterparty) && (
-            <div className="mt-0.5 text-sm font-medium text-[rgb(var(--foreground))]">
-              {tx.merchant || tx.counterparty}
-            </div>
-          )}
-          {tx.categoryName && (
-            <div className="text-xs text-[rgb(var(--muted))]">{tx.categoryName}</div>
-          )}
-          {tx.comment && (
-            <div className="mt-0.5 text-xs text-[rgb(var(--muted-soft))]">{tx.comment}</div>
-          )}
-        </div>
-        <span className={["shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium", badgeBg].join(" ")}>
-          {typeLabel}
-        </span>
-      </div>
-      <div className="flex items-center gap-3 border-t border-[rgb(var(--border-soft))] px-4 py-2 text-[11px] text-[rgb(var(--muted))]">
-        {tx.date && <span>{formatDate(tx.date, locale)}</span>}
-        {accountName && (
-          <>
-            <span className="opacity-40">·</span>
-            <span className="flex items-center gap-1">
-              <BankIcon size={10} />
-              {accountName}
-            </span>
-          </>
-        )}
-        <span className="opacity-40">·</span>
-        <span>
-          {Math.round(tx.confidence * 100)}% {t("chat.confidence")}
-        </span>
-      </div>
-    </div>
-  );
-}
-
 function AccountConfirmCard({ op, t }: { op: CreateAccountOp; t: (key: string) => string }) {
   const typeLabel: Record<string, string> = {
-    CASH: "Cash",
-    CARD: "Card",
-    BANK: "Bank",
-    WISE: "Wise",
-    PAYPAL: "PayPal",
-    CRYPTO: "Crypto",
-    OTHER: "Other",
+    CASH: "Cash", CARD: "Card", BANK: "Bank", WISE: "Wise", PAYPAL: "PayPal", CRYPTO: "Crypto", OTHER: "Other",
   };
 
   return (
@@ -713,7 +917,7 @@ function CategoriesConfirmCard({ op, t }: { op: CreateCategoriesOp; t: (key: str
           {t("chat.createCategories")}
         </span>
       </div>
-      <div className="flex gap-2 border-t border-[rgb(var(--border-soft))] px-4 py-2">
+      <div className="flex flex-wrap gap-2 border-t border-[rgb(var(--border-soft))] px-4 py-2">
         {op.categories.map((c, i) => (
           <span
             key={i}
@@ -732,15 +936,7 @@ function CategoriesConfirmCard({ op, t }: { op: CreateCategoriesOp; t: (key: str
   );
 }
 
-function BudgetConfirmCard({
-  op,
-  t,
-  locale,
-}: {
-  op: SetBudgetOp;
-  t: (key: string) => string;
-  locale: string;
-}) {
+function BudgetConfirmCard({ op, t, locale }: { op: SetBudgetOp; t: (key: string) => string; locale: string }) {
   const periodLabel: Record<string, string> =
     locale === "ru"
       ? { MONTHLY: "ежемесячно", QUARTERLY: "ежеквартально", YEARLY: "ежегодно" }
@@ -768,15 +964,7 @@ function BudgetConfirmCard({
   );
 }
 
-function GoalConfirmCard({
-  op,
-  t,
-  locale,
-}: {
-  op: CreateGoalOp;
-  t: (key: string) => string;
-  locale: string;
-}) {
+function GoalConfirmCard({ op, t, locale }: { op: CreateGoalOp; t: (key: string) => string; locale: string }) {
   return (
     <div className="overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
       <div className="flex items-center gap-3 px-4 py-3">
@@ -787,9 +975,7 @@ function GoalConfirmCard({
           <div className="font-medium text-[rgb(var(--foreground))]">{op.name}</div>
           <div className="text-xs text-[rgb(var(--muted))]">
             {t("chat.targetAmount")}: {op.targetAmount.toLocaleString()} {op.currency}
-            {op.deadline && (
-              <span className="ml-2">· {formatDate(op.deadline, locale)}</span>
-            )}
+            {op.deadline && <span className="ml-2">· {formatDate(op.deadline, locale)}</span>}
             {!op.deadline && <span className="ml-2">· {t("chat.noDeadline")}</span>}
           </div>
         </div>
@@ -806,7 +992,7 @@ function TxSavedCard({
   t,
   locale,
 }: {
-  tx: CreateTransactionsOp["transactions"][number];
+  tx: ParsedTransaction;
   t: (key: string) => string;
   locale: string;
 }) {

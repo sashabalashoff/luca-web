@@ -8,7 +8,8 @@ import {
   PencilIcon,
   PlusIcon,
   TrashIcon,
-  XIcon
+  WarningIcon,
+  XIcon,
 } from "@phosphor-icons/react/dist/ssr";
 import { useEffect, useState } from "react";
 
@@ -21,6 +22,7 @@ type Budget = {
   month?: number | null;
   amount: string;
   currency: string;
+  spent?: number;
   category?: {
     id: string;
     name: string;
@@ -45,10 +47,34 @@ type BudgetForm = {
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December"
+  "July", "August", "September", "October", "November", "December",
 ];
 
+const COMMON_CURRENCIES = ["USD", "EUR", "RUB", "GBP", "AED", "CNY", "JPY", "TRY", "KZT", "UAH"];
+
 const now = new Date();
+
+function fmt(n: number, currency: string) {
+  return `${n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ${currency}`;
+}
+
+function ProgressBar({ pct, over }: { pct: number; over: boolean }) {
+  const clamped = Math.min(pct, 100);
+  const color = over
+    ? "bg-[rgb(var(--negative))]"
+    : pct >= 80
+      ? "bg-amber-400"
+      : "bg-[rgb(var(--positive))]";
+
+  return (
+    <div className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-[rgb(var(--border))]">
+      <div
+        className={["h-full rounded-full transition-all", color].join(" ")}
+        style={{ width: `${clamped}%` }}
+      />
+    </div>
+  );
+}
 
 export function BudgetPageClient() {
   const { t } = useI18n();
@@ -65,14 +91,11 @@ export function BudgetPageClient() {
   const [form, setForm] = useState<BudgetForm>({
     categoryId: "",
     amount: "",
-    currency: workspace?.baseCurrency ?? "USD"
+    currency: workspace?.baseCurrency ?? "USD",
   });
 
-  // Edit state
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState("");
-
-  // Delete confirm
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   function loadBudgets() {
@@ -98,9 +121,7 @@ export function BudgetPageClient() {
   }, [workspace, year, month]);
 
   useEffect(() => {
-    if (workspace) {
-      setForm((f) => ({ ...f, currency: workspace.baseCurrency }));
-    }
+    if (workspace) setForm((f) => ({ ...f, currency: workspace.baseCurrency }));
   }, [workspace]);
 
   async function createBudget() {
@@ -116,8 +137,8 @@ export function BudgetPageClient() {
           year,
           month,
           amount: Number(form.amount),
-          currency: form.currency
-        })
+          currency: form.currency,
+        }),
       });
       setForm({ categoryId: "", amount: "", currency: workspace.baseCurrency });
       setShowForm(false);
@@ -134,7 +155,7 @@ export function BudgetPageClient() {
     try {
       await apiFetch<{ budget: Budget }>(`/api/budget/${id}`, {
         method: "PATCH",
-        body: JSON.stringify({ amount: Number(editAmount) })
+        body: JSON.stringify({ amount: Number(editAmount) }),
       });
       setEditingId(null);
       loadBudgets();
@@ -155,7 +176,14 @@ export function BudgetPageClient() {
     }
   }
 
+  // Summary totals
+  const totalBudget = budgets.reduce((s, b) => s + Number(b.amount), 0);
+  const totalSpent = budgets.reduce((s, b) => s + (b.spent ?? 0), 0);
+  const totalPct = totalBudget > 0 ? (totalSpent / totalBudget) * 100 : 0;
+  const currency = budgets[0]?.currency ?? workspace?.baseCurrency ?? "USD";
+
   const expenseCategories = categories.filter((c) => c.type === "EXPENSE");
+  const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1;
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -166,10 +194,7 @@ export function BudgetPageClient() {
           <p className="mt-0.5 text-sm text-[rgb(var(--muted))]">{t("budget.subtitle")}</p>
         </div>
         <button
-          onClick={() => {
-            setShowForm((v) => !v);
-            setEditingId(null);
-          }}
+          onClick={() => { setShowForm((v) => !v); setEditingId(null); }}
           className="flex items-center gap-1.5 rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2 text-sm font-medium text-[rgb(var(--foreground))] transition hover:bg-[rgb(var(--surface-soft))] active:scale-[0.97]"
         >
           {showForm ? <XIcon size={14} weight="bold" /> : <PlusIcon size={14} weight="bold" />}
@@ -180,9 +205,7 @@ export function BudgetPageClient() {
       {/* Period selector */}
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2">
-          <label className="text-xs font-medium text-[rgb(var(--muted))]">
-            {t("budget.year")}
-          </label>
+          <label className="text-xs font-medium text-[rgb(var(--muted))]">{t("budget.year")}</label>
           <input
             type="number"
             value={year}
@@ -193,27 +216,28 @@ export function BudgetPageClient() {
           />
         </div>
         <div className="flex items-center gap-2">
-          <label className="text-xs font-medium text-[rgb(var(--muted))]">
-            {t("budget.month")}
-          </label>
+          <label className="text-xs font-medium text-[rgb(var(--muted))]">{t("budget.month")}</label>
           <select
             value={month}
             onChange={(e) => setMonth(Number(e.target.value))}
             className="h-8 rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-2 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
           >
             {MONTH_NAMES.map((name, idx) => (
-              <option key={idx + 1} value={idx + 1}>
-                {name}
-              </option>
+              <option key={idx + 1} value={idx + 1}>{name}</option>
             ))}
           </select>
         </div>
+        {isCurrentMonth && (
+          <span className="rounded-full bg-[rgb(var(--accent)/0.1)] px-2 py-0.5 text-xs font-medium text-[rgb(var(--accent))]">
+            Current
+          </span>
+        )}
       </div>
 
       {/* Add form */}
       {showForm && (
         <div className="overflow-hidden rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
-          <div className="flex items-center justify-between border-b border-[rgb(var(--border-soft))] px-5 py-4">
+          <div className="flex items-center justify-between border-b border-[rgb(var(--border-soft))] px-5 py-3.5">
             <span className="text-sm font-semibold">{t("budget.add")}</span>
             <button
               onClick={() => setShowForm(false)}
@@ -241,7 +265,7 @@ export function BudgetPageClient() {
               </select>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-[1fr_120px] gap-3">
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
                   {t("budget.amount")}
@@ -258,15 +282,17 @@ export function BudgetPageClient() {
               </div>
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
-                  {t("accounts.currency")}
+                  Currency
                 </label>
-                <input
+                <select
                   value={form.currency}
-                  onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value.toUpperCase() }))}
-                  placeholder="USD"
-                  maxLength={3}
-                  className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))] focus:ring-2 focus:ring-[rgb(var(--accent)/0.12)]"
-                />
+                  onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}
+                  className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+                >
+                  {COMMON_CURRENCIES.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
               </div>
             </div>
 
@@ -281,13 +307,52 @@ export function BudgetPageClient() {
         </div>
       )}
 
+      {/* Summary card */}
+      {!loading && budgets.length > 0 && (
+        <div className="rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-5">
+          <div className="flex items-end justify-between">
+            <div>
+              <div className="text-xs font-medium text-[rgb(var(--muted))]">
+                {MONTH_NAMES[month - 1]} {year} — total
+              </div>
+              <div className="mt-1 text-2xl font-bold tabular-nums text-[rgb(var(--foreground))]">
+                {fmt(totalSpent, currency)}
+              </div>
+              <div className="mt-0.5 text-sm text-[rgb(var(--muted))]">
+                of {fmt(totalBudget, currency)} budgeted
+              </div>
+            </div>
+            <div className="text-right">
+              <div
+                className={[
+                  "text-xl font-bold tabular-nums",
+                  totalPct > 100
+                    ? "text-[rgb(var(--negative))]"
+                    : totalPct >= 80
+                      ? "text-amber-500"
+                      : "text-[rgb(var(--positive))]",
+                ].join(" ")}
+              >
+                {totalPct.toFixed(0)}%
+              </div>
+              <div className="text-xs text-[rgb(var(--muted))]">
+                {totalBudget - totalSpent >= 0
+                  ? `${fmt(totalBudget - totalSpent, currency)} left`
+                  : `${fmt(totalSpent - totalBudget, currency)} over`}
+              </div>
+            </div>
+          </div>
+          <ProgressBar pct={totalPct} over={totalPct > 100} />
+        </div>
+      )}
+
       {/* Budget list */}
       {loading ? (
         <div className="space-y-3">
           {[1, 2, 3].map((i) => (
             <div
               key={i}
-              className="h-16 animate-pulse rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]"
+              className="h-20 animate-pulse rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]"
             />
           ))}
         </div>
@@ -297,118 +362,158 @@ export function BudgetPageClient() {
             <span className="text-2xl opacity-30">📊</span>
           </div>
           <p className="text-sm text-[rgb(var(--muted))]">{t("budget.empty")}</p>
+          <p className="mt-1 text-xs text-[rgb(var(--muted-soft))]">
+            Set spending limits for your expense categories
+          </p>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
-          {budgets.map((budget, idx) => (
-            <div
-              key={budget.id}
-              className={[
-                idx < budgets.length - 1 ? "border-b border-[rgb(var(--border-soft))]" : ""
-              ].join(" ")}
-            >
-              {editingId === budget.id ? (
-                /* Inline edit */
-                <div className="flex items-center gap-3 px-5 py-3.5">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium text-[rgb(var(--foreground))]">
+        <div className="space-y-3">
+          {budgets.map((budget) => {
+            const limit = Number(budget.amount);
+            const spent = budget.spent ?? 0;
+            const remaining = limit - spent;
+            const pct = limit > 0 ? (spent / limit) * 100 : 0;
+            const over = pct > 100;
+            const nearLimit = pct >= 80 && !over;
+
+            return (
+              <div
+                key={budget.id}
+                className="overflow-hidden rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]"
+              >
+                {editingId === budget.id ? (
+                  <div className="flex items-center gap-3 px-5 py-4">
+                    <div className="min-w-0 flex-1 text-sm font-medium text-[rgb(var(--foreground))]">
                       {budget.category
                         ? `${budget.category.icon ? budget.category.icon + " " : ""}${budget.category.name}`
                         : t("budget.allCategories")}
                     </div>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={editAmount}
+                      onChange={(e) => setEditAmount(e.target.value)}
+                      className="h-8 w-28 rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-2 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+                      autoFocus
+                    />
+                    <button
+                      onClick={() => saveEdit(budget.id)}
+                      disabled={saving || !editAmount}
+                      className="flex h-7 w-7 items-center justify-center rounded-lg bg-[rgb(var(--foreground))] text-[rgb(var(--background))] transition hover:opacity-85 disabled:opacity-40"
+                    >
+                      <CheckIcon size={13} weight="bold" />
+                    </button>
+                    <button
+                      onClick={() => setEditingId(null)}
+                      className="flex h-7 w-7 items-center justify-center rounded-lg border border-[rgb(var(--border))] text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))]"
+                    >
+                      <XIcon size={13} />
+                    </button>
                   </div>
-                  <input
-                    type="number"
-                    step="any"
-                    min="0"
-                    value={editAmount}
-                    onChange={(e) => setEditAmount(e.target.value)}
-                    className="h-8 w-28 rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-2 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
-                    autoFocus
-                  />
-                  <button
-                    onClick={() => saveEdit(budget.id)}
-                    disabled={saving || !editAmount}
-                    className="flex h-7 w-7 items-center justify-center rounded-lg bg-[rgb(var(--foreground))] text-[rgb(var(--background))] transition hover:opacity-85 disabled:opacity-40"
-                  >
-                    <CheckIcon size={13} weight="bold" />
-                  </button>
-                  <button
-                    onClick={() => setEditingId(null)}
-                    className="flex h-7 w-7 items-center justify-center rounded-lg border border-[rgb(var(--border))] text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))]"
-                  >
-                    <XIcon size={13} />
-                  </button>
-                </div>
-              ) : (
-                /* Normal row */
-                <div className="group flex items-center gap-3 px-5 py-4 transition-colors hover:bg-[rgb(var(--surface-soft))]">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      {budget.category?.icon && (
-                        <span className="text-base leading-none">{budget.category.icon}</span>
+                ) : (
+                  <div className="group px-5 py-4 transition-colors hover:bg-[rgb(var(--surface-soft)/0.5)]">
+                    <div className="flex items-start gap-3">
+                      {/* Category icon */}
+                      {budget.category?.icon ? (
+                        <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[rgb(var(--surface-soft))] text-lg">
+                          {budget.category.icon}
+                        </div>
+                      ) : (
+                        <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[rgb(var(--surface-soft))] text-sm text-[rgb(var(--muted))]">
+                          📊
+                        </div>
                       )}
-                      <span className="text-sm font-medium text-[rgb(var(--foreground))]">
-                        {budget.category ? budget.category.name : t("budget.allCategories")}
-                      </span>
-                    </div>
-                    <div className="mt-0.5 text-xs text-[rgb(var(--muted))]">
-                      {budget.currency}{" "}
-                      {Number(budget.amount).toLocaleString(undefined, {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2
-                      })}
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm font-semibold text-[rgb(var(--foreground))]">
+                              {budget.category ? budget.category.name : t("budget.allCategories")}
+                            </span>
+                            {over && (
+                              <WarningIcon
+                                size={14}
+                                weight="fill"
+                                className="text-[rgb(var(--negative))]"
+                              />
+                            )}
+                            {nearLimit && (
+                              <WarningIcon
+                                size={14}
+                                weight="fill"
+                                className="text-amber-500"
+                              />
+                            )}
+                          </div>
+
+                          {/* Actions (hover) */}
+                          {deleteConfirmId === budget.id ? (
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs text-[rgb(var(--muted))]">{t("budget.deleteConfirm")}</span>
+                              <button
+                                onClick={() => deleteBudget(budget.id)}
+                                className="flex h-6 w-6 items-center justify-center rounded-md bg-[rgb(var(--negative-dim))] text-[rgb(var(--negative))] transition hover:opacity-80"
+                              >
+                                <CheckIcon size={11} weight="bold" />
+                              </button>
+                              <button
+                                onClick={() => setDeleteConfirmId(null)}
+                                className="flex h-6 w-6 items-center justify-center rounded-md text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))]"
+                              >
+                                <XIcon size={11} />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                              <button
+                                onClick={() => { setEditingId(budget.id); setEditAmount(budget.amount); setDeleteConfirmId(null); }}
+                                className="flex h-7 w-7 items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
+                              >
+                                <PencilIcon size={13} weight="bold" />
+                              </button>
+                              <button
+                                onClick={() => { setDeleteConfirmId((p) => (p === budget.id ? null : budget.id)); setEditingId(null); }}
+                                className="flex h-7 w-7 items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--negative-dim))] hover:text-[rgb(var(--negative))]"
+                              >
+                                <TrashIcon size={13} weight="bold" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Spend amounts row */}
+                        <div className="mt-1 flex items-baseline gap-1.5 text-sm">
+                          <span
+                            className={[
+                              "font-semibold tabular-nums",
+                              over
+                                ? "text-[rgb(var(--negative))]"
+                                : nearLimit
+                                  ? "text-amber-600"
+                                  : "text-[rgb(var(--foreground))]",
+                            ].join(" ")}
+                          >
+                            {fmt(spent, budget.currency)}
+                          </span>
+                          <span className="text-[rgb(var(--muted-soft))]">/</span>
+                          <span className="text-[rgb(var(--muted))]">{fmt(limit, budget.currency)}</span>
+                          <span className="ml-auto text-xs tabular-nums text-[rgb(var(--muted))]">
+                            {remaining >= 0
+                              ? `${fmt(remaining, budget.currency)} left`
+                              : `${fmt(-remaining, budget.currency)} over`}
+                          </span>
+                        </div>
+
+                        {/* Progress bar */}
+                        <ProgressBar pct={pct} over={over} />
+                      </div>
                     </div>
                   </div>
-
-                  {/* Actions */}
-                  {deleteConfirmId === budget.id ? (
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs text-[rgb(var(--muted))]">
-                        {t("budget.deleteConfirm")}
-                      </span>
-                      <button
-                        onClick={() => deleteBudget(budget.id)}
-                        className="flex h-6 w-6 items-center justify-center rounded-md bg-[rgb(var(--negative-dim))] text-[rgb(var(--negative))] transition hover:opacity-80"
-                      >
-                        <CheckIcon size={11} weight="bold" />
-                      </button>
-                      <button
-                        onClick={() => setDeleteConfirmId(null)}
-                        className="flex h-6 w-6 items-center justify-center rounded-md text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))]"
-                      >
-                        <XIcon size={11} />
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                      <button
-                        onClick={() => {
-                          setEditingId(budget.id);
-                          setEditAmount(budget.amount);
-                          setDeleteConfirmId(null);
-                        }}
-                        className="flex h-7 w-7 items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
-                        title={t("common.edit")}
-                      >
-                        <PencilIcon size={13} weight="bold" />
-                      </button>
-                      <button
-                        onClick={() => {
-                          setDeleteConfirmId((prev) => (prev === budget.id ? null : budget.id));
-                          setEditingId(null);
-                        }}
-                        className="flex h-7 w-7 items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--negative-dim))] hover:text-[rgb(var(--negative))]"
-                        title={t("common.delete")}
-                      >
-                        <TrashIcon size={13} weight="bold" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

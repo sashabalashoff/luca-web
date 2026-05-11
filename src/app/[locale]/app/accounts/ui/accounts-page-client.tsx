@@ -41,7 +41,24 @@ const ACCOUNT_TYPES: Account["type"][] = [
   "WISE",
   "PAYPAL",
   "CRYPTO",
-  "OTHER"
+  "OTHER",
+];
+
+const ACCOUNT_TYPE_LABELS: Record<Account["type"], string> = {
+  CASH: "💵 Cash",
+  CARD: "💳 Card",
+  BANK: "🏦 Bank",
+  WISE: "🌍 Wise",
+  PAYPAL: "🅿️ PayPal",
+  CRYPTO: "₿ Crypto",
+  OTHER: "🪙 Other",
+};
+
+const CURRENCIES = [
+  "USD", "EUR", "RUB", "GBP", "AED", "CNY", "JPY", "TRY", "KZT", "UAH",
+  "CAD", "AUD", "CHF", "INR", "BRL", "MXN", "SGD", "HKD", "PLN", "CZK",
+  "SEK", "NOK", "DKK", "HUF", "RON", "BGN", "HRK",
+  "BTC", "ETH", "USDT", "SOL", "TON",
 ];
 
 const defaultForm = (currency: string): AccountForm => ({
@@ -282,8 +299,8 @@ export function AccountsPageClient() {
                       <span className="text-sm font-medium text-[rgb(var(--foreground))]">
                         {account.name}
                       </span>
-                      <span className="rounded-md bg-[rgb(var(--surface-soft))] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[rgb(var(--muted))]">
-                        {account.type}
+                      <span className="rounded-md bg-[rgb(var(--surface-soft))] px-1.5 py-0.5 text-[10px] font-medium text-[rgb(var(--muted))]">
+                        {ACCOUNT_TYPE_LABELS[account.type]}
                       </span>
                       {account.isDebt && (
                         <span className="rounded-md bg-[rgb(var(--negative-dim))] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[rgb(var(--negative))]">
@@ -405,26 +422,29 @@ function AccountFormFields({
             onChange={(e) => onChange({ type: e.target.value as AccountForm["type"] })}
             className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
           >
-            {(["CASH", "CARD", "BANK", "WISE", "PAYPAL", "CRYPTO", "OTHER"] as const).map(
-              (type) => (
-                <option key={type} value={type}>
-                  {type}
-                </option>
-              )
-            )}
+            {ACCOUNT_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {ACCOUNT_TYPE_LABELS[type]}
+              </option>
+            ))}
           </select>
         </div>
         <div>
           <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
             {t("accounts.currency")}
           </label>
-          <input
-            value={form.currency}
-            onChange={(e) => onChange({ currency: e.target.value.toUpperCase() })}
-            placeholder="USD"
-            maxLength={3}
-            className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))] focus:ring-2 focus:ring-[rgb(var(--accent)/0.12)]"
-          />
+          <select
+            value={CURRENCIES.includes(form.currency) ? form.currency : ""}
+            onChange={(e) => onChange({ currency: e.target.value })}
+            className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+          >
+            {CURRENCIES.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+            {!CURRENCIES.includes(form.currency) && form.currency && (
+              <option value={form.currency}>{form.currency}</option>
+            )}
+          </select>
         </div>
       </div>
 

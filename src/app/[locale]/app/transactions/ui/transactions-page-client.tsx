@@ -7,12 +7,16 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   ArrowsLeftRightIcon,
+  CalendarBlankIcon,
   CheckIcon,
+  FunnelSimpleIcon,
+  MagnifyingGlassIcon,
+  PencilLineIcon,
   PlusIcon,
   TrashIcon,
-  XIcon
+  XIcon,
 } from "@phosphor-icons/react/dist/ssr";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Transaction = {
   id: string;
@@ -21,8 +25,9 @@ type Transaction = {
   currency: string;
   date: string;
   merchant?: string | null;
+  counterparty?: string | null;
   comment?: string | null;
-  category?: { name: string; icon?: string | null } | null;
+  category?: { id: string; name: string; icon?: string | null; type: string } | null;
   account?: { id: string; name: string } | null;
 };
 
@@ -39,7 +44,9 @@ type DayGroup = {
   items: Transaction[];
 };
 
-type Filter = "ALL" | "INCOME" | "EXPENSE";
+type Filter = "ALL" | "INCOME" | "EXPENSE" | "TRANSFER";
+
+const COMMON_CURRENCIES = ["USD", "EUR", "RUB", "GBP", "AED", "CNY", "JPY", "TRY", "KZT", "UAH", "BTC", "ETH"];
 
 function groupByDay(txs: Transaction[]): DayGroup[] {
   const map = new Map<string, Transaction[]>();
@@ -55,64 +62,132 @@ function groupByDay(txs: Transaction[]): DayGroup[] {
       label: new Date(iso + "T12:00:00").toLocaleDateString(undefined, {
         weekday: "long",
         month: "long",
-        day: "numeric"
+        day: "numeric",
       }),
-      items
+      items,
     }));
 }
 
-const today = new Date().toISOString().split("T")[0];
+function formatTime(dateStr: string): string | null {
+  const time = dateStr.slice(11, 16); // "HH:MM"
+  if (!time || time === "00:00") return null;
+  return time;
+}
+
+const todayIso = new Date().toISOString().split("T")[0];
 
 export function TransactionsPageClient() {
   const { t, locale } = useI18n();
   const { workspace, accounts, defaultAccount, isLoading: bootstrapLoading, reload: reloadContext } = useLuca();
+
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  const [categories, setCategories] = useState<Category[]>([]);
+
+  // Filters
+  const [filter, setFilter] = useState<Filter>("ALL");
+  const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [filterAccountId, setFilterAccountId] = useState("");
+  const [filterCategoryId, setFilterCategoryId] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
+  const searchRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+  // UI states
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [filter, setFilter] = useState<Filter>("ALL");
+  const [editingId, setEditingId] = useState<string | null>(null);
 
-  /* Add form */
+  // Add form
   const [showAddForm, setShowAddForm] = useState(false);
-  const [categories, setCategories] = useState<Category[]>([]);
   const [savingTx, setSavingTx] = useState(false);
   const [addForm, setAddForm] = useState({
     type: "EXPENSE" as "INCOME" | "EXPENSE",
     amount: "",
+    currency: "",
     categoryId: "",
     merchant: "",
     comment: "",
-    date: today,
-    accountId: ""
+    date: todayIso,
+    accountId: "",
   });
+
+  function buildQuery(cursor?: string) {
+    const p = new URLSearchParams({ workspaceId: workspace!.id, limit: "50" });
+    if (filter !== "ALL") p.set("type", filter);
+    if (debouncedSearch) p.set("search", debouncedSearch);
+    if (dateFrom) p.set("dateFrom", dateFrom);
+    if (dateTo) p.set("dateTo", dateTo);
+    if (filterAccountId) p.set("accountId", filterAccountId);
+    if (filterCategoryId) p.set("categoryId", filterCategoryId);
+    if (cursor) p.set("cursor", cursor);
+    return `/api/transactions?${p}`;
+  }
 
   function loadTransactions() {
     if (!workspace) return;
     setLoading(true);
-    apiFetch<{ transactions: Transaction[] }>(
-      `/api/transactions?workspaceId=${workspace.id}`
-    )
-      .then((r) => setTransactions(r.transactions))
+    setNextCursor(null);
+    apiFetch<{ transactions: Transaction[]; nextCursor: string | null; hasMore: boolean }>(buildQuery())
+      .then((r) => {
+        setTransactions(r.transactions);
+        setNextCursor(r.nextCursor);
+        setHasMore(r.hasMore);
+      })
       .catch(console.error)
       .finally(() => setLoading(false));
   }
 
+  async function loadMore() {
+    if (!workspace || !nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const r = await apiFetch<{ transactions: Transaction[]; nextCursor: string | null; hasMore: boolean }>(
+        buildQuery(nextCursor)
+      );
+      setTransactions((prev) => [...prev, ...r.transactions]);
+      setNextCursor(r.nextCursor);
+      setHasMore(r.hasMore);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
   useEffect(() => {
     loadTransactions();
-  }, [workspace]);
+  }, [workspace, filter, debouncedSearch, dateFrom, dateTo, filterAccountId, filterCategoryId]);
 
-  // Load categories when add form opens
+  // Debounce search
   useEffect(() => {
-    if (!showAddForm || !workspace || categories.length > 0) return;
+    if (searchRef.current) clearTimeout(searchRef.current);
+    searchRef.current = setTimeout(() => setDebouncedSearch(search), 350);
+    return () => { if (searchRef.current) clearTimeout(searchRef.current); };
+  }, [search]);
+
+  // Load categories once
+  useEffect(() => {
+    if (!workspace || categories.length > 0) return;
     apiFetch<{ categories: Category[] }>(`/api/categories?workspaceId=${workspace.id}`)
       .then((r) => setCategories(r.categories))
       .catch(console.error);
-  }, [showAddForm, workspace]);
+  }, [workspace]);
 
-  // Pre-fill accountId when defaultAccount loads
+  // Pre-fill accountId and currency when default account loads
   useEffect(() => {
     if (defaultAccount && !addForm.accountId) {
-      setAddForm((f) => ({ ...f, accountId: defaultAccount.id }));
+      setAddForm((f) => ({
+        ...f,
+        accountId: defaultAccount.id,
+        currency: f.currency || defaultAccount.currency,
+      }));
     }
   }, [defaultAccount]);
 
@@ -134,37 +209,40 @@ export function TransactionsPageClient() {
     if (!workspace || !addForm.amount) return;
     const accountId = addForm.accountId || defaultAccount?.id;
     if (!accountId) return;
+    const currency =
+      addForm.currency ||
+      accounts.find((a) => a.id === accountId)?.currency ||
+      workspace.baseCurrency;
 
     setSavingTx(true);
     try {
-      await apiFetch("/api/transactions", {
+      const tx = await apiFetch<{ transaction: Transaction }>("/api/transactions", {
         method: "POST",
         body: JSON.stringify({
           workspaceId: workspace.id,
           accountId,
           type: addForm.type,
           amount: Number(addForm.amount),
-          currency:
-            accounts.find((a) => a.id === accountId)?.currency ??
-            workspace.baseCurrency,
+          currency,
           date: addForm.date,
           categoryId: addForm.categoryId || null,
           merchant: addForm.merchant || null,
           comment: addForm.comment || null,
-          source: "MANUAL"
-        })
+          source: "MANUAL",
+        }),
       });
       setShowAddForm(false);
       setAddForm({
         type: "EXPENSE",
         amount: "",
+        currency: defaultAccount?.currency ?? workspace.baseCurrency,
         categoryId: "",
         merchant: "",
         comment: "",
-        date: today,
-        accountId: defaultAccount?.id ?? ""
+        date: todayIso,
+        accountId: defaultAccount?.id ?? "",
       });
-      loadTransactions();
+      setTransactions((prev) => [tx.transaction, ...prev]);
       reloadContext();
     } catch (err) {
       console.error(err);
@@ -173,9 +251,15 @@ export function TransactionsPageClient() {
     }
   }
 
-  const filtered = filter === "ALL" ? transactions : transactions.filter((tx) => tx.type === filter);
-  const groups = groupByDay(filtered);
+  function handleEditSave(updated: Transaction) {
+    setTransactions((prev) => prev.map((tx) => (tx.id === updated.id ? updated : tx)));
+    setEditingId(null);
+  }
+
+  const groups = groupByDay(transactions);
   const isSpinning = bootstrapLoading || loading;
+
+  const hasActiveFilters = !!(dateFrom || dateTo || filterAccountId || filterCategoryId || debouncedSearch);
 
   const txCountLabel = (n: number) =>
     locale === "ru"
@@ -206,7 +290,7 @@ export function TransactionsPageClient() {
       {/* Add form */}
       {showAddForm && (
         <div className="mb-5 overflow-hidden rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
-          <div className="border-b border-[rgb(var(--border-soft))] px-5 py-4">
+          <div className="border-b border-[rgb(var(--border-soft))] px-5 py-3.5">
             <span className="text-sm font-semibold">{t("transactions.addTitle")}</span>
           </div>
           <div className="space-y-4 p-5">
@@ -222,7 +306,7 @@ export function TransactionsPageClient() {
                       ? tp === "EXPENSE"
                         ? "border-[rgb(var(--negative))] bg-[rgb(var(--negative-dim))] text-[rgb(var(--negative))]"
                         : "border-[rgb(var(--positive))] bg-[rgb(var(--positive-dim))] text-[rgb(var(--positive))]"
-                      : "border-[rgb(var(--border))] text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))]"
+                      : "border-[rgb(var(--border))] text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))]",
                   ].join(" ")}
                 >
                   {tp === "EXPENSE" ? t("transactions.expense") : t("transactions.income")}
@@ -230,11 +314,11 @@ export function TransactionsPageClient() {
               ))}
             </div>
 
-            {/* Amount + Date */}
-            <div className="grid grid-cols-2 gap-3">
+            {/* Amount + Currency */}
+            <div className="grid grid-cols-[1fr_120px] gap-3">
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
-                  {t("transactions.amount")} ({workspace?.baseCurrency})
+                  {t("transactions.amount")}
                 </label>
                 <input
                   type="number"
@@ -248,15 +332,31 @@ export function TransactionsPageClient() {
               </div>
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
-                  {t("transactions.dateLabel")}
+                  Currency
                 </label>
-                <input
-                  type="date"
-                  value={addForm.date}
-                  onChange={(e) => setAddForm((f) => ({ ...f, date: e.target.value }))}
-                  className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))] focus:ring-2 focus:ring-[rgb(var(--accent)/0.12)]"
-                />
+                <select
+                  value={addForm.currency}
+                  onChange={(e) => setAddForm((f) => ({ ...f, currency: e.target.value }))}
+                  className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+                >
+                  {COMMON_CURRENCIES.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
               </div>
+            </div>
+
+            {/* Date */}
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
+                {t("transactions.dateLabel")}
+              </label>
+              <input
+                type="date"
+                value={addForm.date}
+                onChange={(e) => setAddForm((f) => ({ ...f, date: e.target.value }))}
+                className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))] focus:ring-2 focus:ring-[rgb(var(--accent)/0.12)]"
+              />
             </div>
 
             {/* Category */}
@@ -299,7 +399,14 @@ export function TransactionsPageClient() {
                 </label>
                 <select
                   value={addForm.accountId}
-                  onChange={(e) => setAddForm((f) => ({ ...f, accountId: e.target.value }))}
+                  onChange={(e) => {
+                    const acc = accounts.find((a) => a.id === e.target.value);
+                    setAddForm((f) => ({
+                      ...f,
+                      accountId: e.target.value,
+                      currency: acc?.currency ?? f.currency,
+                    }));
+                  }}
                   className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
                 >
                   {accounts.map((a) => (
@@ -311,7 +418,7 @@ export function TransactionsPageClient() {
               </div>
             )}
 
-            <div className="flex gap-2">
+            <div className="flex gap-2 pt-1">
               <button
                 onClick={createTransaction}
                 disabled={savingTx || !addForm.amount}
@@ -330,15 +437,140 @@ export function TransactionsPageClient() {
         </div>
       )}
 
-      {/* Filter tabs */}
+      {/* Search + filter bar */}
+      <div className="mb-3 space-y-2">
+        <div className="flex gap-2">
+          {/* Search */}
+          <div className="relative flex-1">
+            <MagnifyingGlassIcon
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-[rgb(var(--muted))]"
+            />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search merchant, note..."
+              className="h-9 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] pl-8 pr-3 text-sm outline-none transition focus:border-[rgb(var(--accent))] focus:ring-2 focus:ring-[rgb(var(--accent)/0.1)]"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-[rgb(var(--muted))] hover:text-[rgb(var(--foreground))]"
+              >
+                <XIcon size={12} />
+              </button>
+            )}
+          </div>
+
+          {/* Filters toggle */}
+          <button
+            onClick={() => setShowFilters((v) => !v)}
+            className={[
+              "flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium transition",
+              showFilters || hasActiveFilters
+                ? "border-[rgb(var(--accent))] bg-[rgb(var(--accent)/0.08)] text-[rgb(var(--accent))]"
+                : "border-[rgb(var(--border))] text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))]",
+            ].join(" ")}
+          >
+            <FunnelSimpleIcon size={14} />
+            Filters
+            {hasActiveFilters && (
+              <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[rgb(var(--accent))] text-[9px] font-bold text-white">
+                {[dateFrom || dateTo ? 1 : 0, filterAccountId ? 1 : 0, filterCategoryId ? 1 : 0, debouncedSearch ? 1 : 0].reduce((a, b) => a + b, 0)}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {showFilters && (
+          <div className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-4">
+            <div className="grid grid-cols-2 gap-3">
+              {/* Date range */}
+              <div>
+                <label className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">
+                  <CalendarBlankIcon size={11} className="mr-1 inline" />
+                  From
+                </label>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="h-9 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none focus:border-[rgb(var(--accent))]"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">
+                  <CalendarBlankIcon size={11} className="mr-1 inline" />
+                  To
+                </label>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  className="h-9 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none focus:border-[rgb(var(--accent))]"
+                />
+              </div>
+
+              {/* Account filter */}
+              {accounts.length > 1 && (
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">Account</label>
+                  <select
+                    value={filterAccountId}
+                    onChange={(e) => setFilterAccountId(e.target.value)}
+                    className="h-9 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none focus:border-[rgb(var(--accent))]"
+                  >
+                    <option value="">All accounts</option>
+                    {accounts.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Category filter */}
+              <div>
+                <label className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">Category</label>
+                <select
+                  value={filterCategoryId}
+                  onChange={(e) => setFilterCategoryId(e.target.value)}
+                  className="h-9 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none focus:border-[rgb(var(--accent))]"
+                >
+                  <option value="">All categories</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.icon ? `${c.icon} ` : ""}{c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {hasActiveFilters && (
+              <button
+                onClick={() => {
+                  setDateFrom(""); setDateTo(""); setFilterAccountId(""); setFilterCategoryId(""); setSearch("");
+                }}
+                className="mt-3 text-xs text-[rgb(var(--muted))] hover:text-[rgb(var(--negative))] transition"
+              >
+                Clear all filters
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Type filter tabs */}
       <div className="mb-4 flex gap-1">
-        {(["ALL", "INCOME", "EXPENSE"] as Filter[]).map((f) => {
+        {(["ALL", "INCOME", "EXPENSE", "TRANSFER"] as Filter[]).map((f) => {
           const label =
             f === "ALL"
               ? t("transactions.filterAll")
               : f === "INCOME"
                 ? t("transactions.income")
-                : t("transactions.expense");
+                : f === "EXPENSE"
+                  ? t("transactions.expense")
+                  : "Transfer";
           return (
             <button
               key={f}
@@ -347,7 +579,7 @@ export function TransactionsPageClient() {
                 "rounded-lg px-3 py-1.5 text-xs font-medium transition",
                 filter === f
                   ? "bg-[rgb(var(--foreground))] text-[rgb(var(--background))]"
-                  : "text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
+                  : "text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]",
               ].join(" ")}
             >
               {label}
@@ -356,7 +588,8 @@ export function TransactionsPageClient() {
         })}
         {!isSpinning && transactions.length > 0 && (
           <span className="ml-auto self-center text-xs text-[rgb(var(--muted-soft))]">
-            {txCountLabel(filtered.length)}
+            {txCountLabel(transactions.length)}
+            {hasMore && "+"}
           </span>
         )}
       </div>
@@ -377,15 +610,21 @@ export function TransactionsPageClient() {
             <span className="text-3xl opacity-30">💸</span>
           </div>
           <p className="text-sm text-[rgb(var(--muted))]">{t("transactions.empty")}</p>
+          {hasActiveFilters && (
+            <button
+              onClick={() => { setSearch(""); setDateFrom(""); setDateTo(""); setFilterAccountId(""); setFilterCategoryId(""); }}
+              className="mt-3 text-xs text-[rgb(var(--accent))] hover:underline"
+            >
+              Clear filters
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-6">
           {groups.map((group) => (
             <div key={group.iso}>
               <div className="mb-2.5 flex items-center justify-between">
-                <span className="text-xs font-semibold text-[rgb(var(--muted))]">
-                  {group.label}
-                </span>
+                <span className="text-xs font-semibold text-[rgb(var(--muted))]">{group.label}</span>
                 <span className="text-xs text-[rgb(var(--muted-soft))]">
                   {txCountLabel(group.items.length)}
                 </span>
@@ -398,47 +637,83 @@ export function TransactionsPageClient() {
                     isLast={idx === group.items.length - 1}
                     isDeleting={deletingId === tx.id}
                     confirmingDelete={confirmDeleteId === tx.id}
-                    onDeleteRequest={() =>
-                      setConfirmDeleteId((prev) => (prev === tx.id ? null : tx.id))
-                    }
+                    isEditing={editingId === tx.id}
+                    categories={categories}
+                    accounts={accounts as { id: string; name: string; currency: string }[]}
+                    onDeleteRequest={() => setConfirmDeleteId((prev) => (prev === tx.id ? null : tx.id))}
                     onDeleteConfirm={() => deleteTransaction(tx.id)}
                     onDeleteCancel={() => setConfirmDeleteId(null)}
+                    onEditToggle={() => setEditingId((prev) => (prev === tx.id ? null : tx.id))}
+                    onEditSave={handleEditSave}
                     t={t}
                   />
                 ))}
               </div>
             </div>
           ))}
+
+          {hasMore && (
+            <div className="flex justify-center">
+              <button
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-6 py-2.5 text-sm font-medium text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] disabled:opacity-50"
+              >
+                {loadingMore ? "Loading..." : "Load more"}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
+// ─── TxRow ────────────────────────────────────────────────────────────────────
+
+type TxRowAccount = { id: string; name: string; currency: string };
+
 function TxRow({
   tx,
   isLast,
   isDeleting,
   confirmingDelete,
+  isEditing,
+  categories,
+  accounts,
   onDeleteRequest,
   onDeleteConfirm,
   onDeleteCancel,
-  t
+  onEditToggle,
+  onEditSave,
+  t,
 }: {
   tx: Transaction;
   isLast: boolean;
   isDeleting: boolean;
   confirmingDelete: boolean;
+  isEditing: boolean;
+  categories: Category[];
+  accounts: TxRowAccount[];
   onDeleteRequest: () => void;
   onDeleteConfirm: () => void;
   onDeleteCancel: () => void;
+  onEditToggle: () => void;
+  onEditSave: (updated: Transaction) => void;
   t: (key: string) => string;
 }) {
   const isExpense = tx.type === "EXPENSE";
   const isIncome = tx.type === "INCOME";
   const amount = Number(tx.amount);
   const label = tx.merchant || tx.category?.name || tx.comment || tx.type;
-  const sub = tx.merchant && tx.category?.name ? tx.category.name : tx.account?.name ?? null;
+  const sub = [
+    tx.merchant && tx.category?.name ? tx.category.name : null,
+    tx.account?.name,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const timeStr = formatTime(tx.date);
 
   const iconBg = isExpense
     ? "bg-[rgb(var(--negative-dim))] text-[rgb(var(--negative))]"
@@ -452,69 +727,245 @@ function TxRow({
       ? "text-[rgb(var(--positive))]"
       : "text-[rgb(var(--foreground))]";
 
+  // Edit state
+  const relevantCategories = categories.filter(
+    (c) => c.type === tx.type || c.type === "TRANSFER"
+  );
+  const [editForm, setEditForm] = useState({
+    amount: String(Number(tx.amount)),
+    currency: tx.currency,
+    categoryId: tx.category?.id ?? "",
+    merchant: tx.merchant ?? "",
+    comment: tx.comment ?? "",
+    date: tx.date.slice(0, 10),
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (isEditing) {
+      setEditForm({
+        amount: String(Number(tx.amount)),
+        currency: tx.currency,
+        categoryId: tx.category?.id ?? "",
+        merchant: tx.merchant ?? "",
+        comment: tx.comment ?? "",
+        date: tx.date.slice(0, 10),
+      });
+    }
+  }, [isEditing]);
+
+  async function saveEdit() {
+    setSaving(true);
+    try {
+      const body: Record<string, unknown> = {
+        date: editForm.date,
+        merchant: editForm.merchant || null,
+        comment: editForm.comment || null,
+        categoryId: editForm.categoryId || null,
+        amount: Number(editForm.amount),
+        currency: editForm.currency,
+      };
+      const updated = await apiFetch<{ transaction: Transaction }>(
+        `/api/transactions/${tx.id}`,
+        { method: "PATCH", body: JSON.stringify(body) }
+      );
+      // Merge back the relations that PATCH doesn't return fully
+      const merged: Transaction = {
+        ...updated.transaction,
+        category: categories.find((c) => c.id === (editForm.categoryId || null)) ?? null,
+        account: tx.account,
+      };
+      onEditSave(merged);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <div
-      className={[
-        "group flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-[rgb(var(--surface-soft))]",
-        !isLast ? "border-b border-[rgb(var(--border-soft))]" : "",
-        isDeleting ? "opacity-40" : ""
-      ].join(" ")}
-    >
-      {/* Icon */}
-      <div className={["flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-sm", iconBg].join(" ")}>
-        {tx.category?.icon ? (
-          <span className="leading-none">{tx.category.icon}</span>
-        ) : isExpense ? (
-          <ArrowDownIcon size={15} weight="bold" />
-        ) : isIncome ? (
-          <ArrowUpIcon size={15} weight="bold" />
-        ) : (
-          <ArrowsLeftRightIcon size={15} weight="bold" />
-        )}
-      </div>
-
-      {/* Label */}
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium text-[rgb(var(--foreground))]">{label}</div>
-        {sub && (
-          <div className="truncate text-xs text-[rgb(var(--muted))]">{sub}</div>
-        )}
-      </div>
-
-      {/* Amount */}
-      <div className={["shrink-0 text-sm font-semibold tabular-nums", amountColor].join(" ")}>
-        {isExpense ? "−" : isIncome ? "+" : ""}
-        {amount.toFixed(2)} {tx.currency}
-      </div>
-
-      {/* Delete controls */}
-      {confirmingDelete ? (
-        <div className="ml-1 flex items-center gap-1">
-          <span className="text-xs text-[rgb(var(--muted))]">{t("transactions.confirmDeleteQ")}</span>
-          <button
-            onClick={onDeleteConfirm}
-            disabled={isDeleting}
-            className="flex h-6 w-6 items-center justify-center rounded-md bg-[rgb(var(--negative-dim))] text-[rgb(var(--negative))] transition hover:opacity-80"
-          >
-            <CheckIcon size={11} weight="bold" />
-          </button>
-          <button
-            onClick={onDeleteCancel}
-            className="flex h-6 w-6 items-center justify-center rounded-md text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))]"
-          >
-            <XIcon size={11} />
-          </button>
+    <>
+      <div
+        className={[
+          "group flex items-center gap-3 px-4 py-3.5 transition-colors",
+          !isLast && !isEditing ? "border-b border-[rgb(var(--border-soft))]" : "",
+          isEditing ? "bg-[rgb(var(--surface-soft))]" : "hover:bg-[rgb(var(--surface-soft))]",
+          isDeleting ? "opacity-40" : "",
+        ].join(" ")}
+      >
+        {/* Icon */}
+        <div className={["flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-sm", iconBg].join(" ")}>
+          {tx.category?.icon ? (
+            <span className="leading-none">{tx.category.icon}</span>
+          ) : isExpense ? (
+            <ArrowDownIcon size={15} weight="bold" />
+          ) : isIncome ? (
+            <ArrowUpIcon size={15} weight="bold" />
+          ) : (
+            <ArrowsLeftRightIcon size={15} weight="bold" />
+          )}
         </div>
-      ) : (
-        <button
-          onClick={onDeleteRequest}
-          disabled={isDeleting}
-          className="ml-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[rgb(var(--muted))] opacity-0 transition-all hover:bg-[rgb(var(--negative-dim))] hover:text-[rgb(var(--negative))] group-hover:opacity-100 disabled:opacity-30"
-          title={t("common.delete")}
-        >
-          <TrashIcon size={13} weight="bold" />
-        </button>
+
+        {/* Label */}
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium text-[rgb(var(--foreground))]">{label}</div>
+          <div className="flex items-center gap-1.5">
+            {sub && <span className="truncate text-xs text-[rgb(var(--muted))]">{sub}</span>}
+            {timeStr && (
+              <span className="shrink-0 text-xs text-[rgb(var(--muted-soft))]">{timeStr}</span>
+            )}
+          </div>
+        </div>
+
+        {/* Amount */}
+        <div className={["shrink-0 text-sm font-semibold tabular-nums", amountColor].join(" ")}>
+          {isExpense ? "−" : isIncome ? "+" : ""}
+          {amount.toFixed(2)} {tx.currency}
+        </div>
+
+        {/* Actions */}
+        <div className="ml-1 flex shrink-0 items-center gap-0.5">
+          {confirmingDelete ? (
+            <>
+              <span className="mr-1 text-xs text-[rgb(var(--muted))]">{t("transactions.confirmDeleteQ")}</span>
+              <button
+                onClick={onDeleteConfirm}
+                disabled={isDeleting}
+                className="flex h-6 w-6 items-center justify-center rounded-md bg-[rgb(var(--negative-dim))] text-[rgb(var(--negative))] transition hover:opacity-80"
+              >
+                <CheckIcon size={11} weight="bold" />
+              </button>
+              <button
+                onClick={onDeleteCancel}
+                className="flex h-6 w-6 items-center justify-center rounded-md text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))]"
+              >
+                <XIcon size={11} />
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={onEditToggle}
+                className={[
+                  "flex h-7 w-7 items-center justify-center rounded-lg transition-all",
+                  isEditing
+                    ? "bg-[rgb(var(--accent)/0.12)] text-[rgb(var(--accent))]"
+                    : "text-[rgb(var(--muted))] opacity-0 hover:bg-[rgb(var(--surface-soft))] group-hover:opacity-100",
+                ].join(" ")}
+                title="Edit"
+              >
+                <PencilLineIcon size={13} weight="bold" />
+              </button>
+              <button
+                onClick={onDeleteRequest}
+                disabled={isDeleting}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[rgb(var(--muted))] opacity-0 transition-all hover:bg-[rgb(var(--negative-dim))] hover:text-[rgb(var(--negative))] group-hover:opacity-100 disabled:opacity-30"
+                title={t("common.delete")}
+              >
+                <TrashIcon size={13} weight="bold" />
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Inline edit panel */}
+      {isEditing && (
+        <div className={["border-b border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] px-4 pb-4 pt-0", !isLast ? "" : ""].join(" ")}>
+          <div className="grid grid-cols-2 gap-3">
+            {/* Amount + currency */}
+            <div>
+              <label className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">Amount</label>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={editForm.amount}
+                onChange={(e) => setEditForm((f) => ({ ...f, amount: e.target.value }))}
+                className="h-9 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 text-sm outline-none focus:border-[rgb(var(--accent))]"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">Currency</label>
+              <select
+                value={editForm.currency}
+                onChange={(e) => setEditForm((f) => ({ ...f, currency: e.target.value }))}
+                className="h-9 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 text-sm outline-none focus:border-[rgb(var(--accent))]"
+              >
+                {COMMON_CURRENCIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Date */}
+            <div>
+              <label className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">Date</label>
+              <input
+                type="date"
+                value={editForm.date}
+                onChange={(e) => setEditForm((f) => ({ ...f, date: e.target.value }))}
+                className="h-9 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 text-sm outline-none focus:border-[rgb(var(--accent))]"
+              />
+            </div>
+
+            {/* Category */}
+            <div>
+              <label className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">Category</label>
+              <select
+                value={editForm.categoryId}
+                onChange={(e) => setEditForm((f) => ({ ...f, categoryId: e.target.value }))}
+                className="h-9 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 text-sm outline-none focus:border-[rgb(var(--accent))]"
+              >
+                <option value="">— none —</option>
+                {relevantCategories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.icon ? `${c.icon} ` : ""}{c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Merchant */}
+            <div>
+              <label className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">Merchant</label>
+              <input
+                value={editForm.merchant}
+                onChange={(e) => setEditForm((f) => ({ ...f, merchant: e.target.value }))}
+                placeholder="optional"
+                className="h-9 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 text-sm outline-none focus:border-[rgb(var(--accent))]"
+              />
+            </div>
+
+            {/* Comment */}
+            <div>
+              <label className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">Note</label>
+              <input
+                value={editForm.comment}
+                onChange={(e) => setEditForm((f) => ({ ...f, comment: e.target.value }))}
+                placeholder="optional"
+                className="h-9 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 text-sm outline-none focus:border-[rgb(var(--accent))]"
+              />
+            </div>
+          </div>
+
+          <div className="mt-3 flex gap-2">
+            <button
+              onClick={saveEdit}
+              disabled={saving || !editForm.amount}
+              className="rounded-lg bg-[rgb(var(--foreground))] px-4 py-2 text-xs font-semibold text-[rgb(var(--background))] transition hover:opacity-85 disabled:opacity-40"
+            >
+              {saving ? "Saving..." : "Save changes"}
+            </button>
+            <button
+              onClick={onEditToggle}
+              className="rounded-lg border border-[rgb(var(--border))] px-4 py-2 text-xs text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface))]"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
-    </div>
+    </>
   );
 }

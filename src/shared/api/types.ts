@@ -58,6 +58,7 @@ export type ParsedTransaction = {
   amount: number;
   currency: string;
   categoryName?: string | null;
+  accountName?: string | null;
   merchant?: string | null;
   counterparty?: string | null;
   comment?: string | null;
