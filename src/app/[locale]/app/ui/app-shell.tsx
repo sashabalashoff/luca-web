@@ -27,8 +27,9 @@ const nav = [
   { href: "/app/accounts",      labelKey: "navigation.accounts",     icon: AppIcons.accounts },
   { href: "/app/categories",    labelKey: "navigation.categories",   icon: AppIcons.categories },
   { href: "/app/budget",        labelKey: "navigation.budget",       icon: AppIcons.budget },
-  { href: "/app/reports",       labelKey: "navigation.reports",      icon: AppIcons.reports },
-  { href: "/app/goals",         labelKey: "navigation.goals",        icon: AppIcons.goals },
+  { href: "/app/reports",         labelKey: "navigation.reports",        icon: AppIcons.reports },
+  { href: "/app/goals",           labelKey: "navigation.goals",          icon: AppIcons.goals },
+  { href: "/app/exchange-rates",  labelKey: "navigation.exchangeRates",  icon: AppIcons.exchangeRates },
 ];
 
 const SIDEBAR_COLLAPSED_KEY = "luca-sidebar-collapsed";

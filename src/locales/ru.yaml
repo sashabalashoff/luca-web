@@ -37,6 +37,7 @@ navigation:
   accounts: "Счета"
   categories: "Категории"
   budget: "Бюджет"
+  exchangeRates: "Курсы валют"
 
 chat:
   title: "LUCA Chat"
@@ -178,6 +179,19 @@ categories:
   expense: "Расходы"
   defaultBadge: "По умолчанию"
   deleteConfirm: "Удалить категорию?"
+
+exchangeRates:
+  title: "Курсы валют"
+  subtitle: "Актуальные рыночные курсы от open.er-api.com."
+  updated: "Обновлено"
+  refresh: "Обновить"
+  converter: "Конвертер валют"
+  from: "Из"
+  to: "В"
+  currency: "Валюта"
+  search: "Поиск валют..."
+  loading: "Загрузка курсов..."
+  error: "Не удалось загрузить курсы. Проверь соединение."
 
 budget:
   title: "Бюджет"

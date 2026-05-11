@@ -9,6 +9,7 @@ import {
   ChatCircleTextIcon,
   CheckIcon,
   CreditCardIcon,
+  CurrencyDollarIcon,
   GearSixIcon,
   GlobeHemisphereWestIcon,
   HouseIcon,
@@ -49,5 +50,6 @@ export const AppIcons = {
   settings: GearSixIcon,
   accounts: BankIcon,
   categories: TagIcon,
-  budget: ChartBarIcon
+  budget: ChartBarIcon,
+  exchangeRates: CurrencyDollarIcon,
 };

@@ -3,6 +3,7 @@
 import { apiFetch, getAuthToken } from "@/shared/api/client";
 import { useI18n } from "@/shared/i18n/i18n-provider";
 import { useLuca } from "@/shared/providers/luca-provider";
+import { AccountPicker } from "@/shared/ui/account-picker";
 import type {
   AiOperation,
   CreateAccountOp,
@@ -356,7 +357,6 @@ export function ChatPageClient() {
                   key={message.id}
                   message={message}
                   accounts={accounts}
-                  defaultAccount={defaultAccount}
                   onConfirm={confirmAction}
                   onReject={rejectAction}
                   onUpdateOverride={updateOverride}
@@ -463,7 +463,6 @@ function Dots() {
 function MessageRow({
   message,
   accounts,
-  defaultAccount,
   onConfirm,
   onReject,
   onUpdateOverride,
@@ -472,7 +471,6 @@ function MessageRow({
 }: {
   message: Message;
   accounts: { id: string; name: string; currency: string }[];
-  defaultAccount: { id: string; name: string } | null;
   onConfirm: (id: string) => void;
   onReject: (id: string) => void;
   onUpdateOverride: (actionId: string, txIndex: number, patch: Partial<TransactionOverride>) => void;
@@ -735,41 +733,24 @@ function TxConfirmCard({
               />
             </div>
             {accounts.length > 0 && (
-              <div>
-                <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[rgb(var(--muted))]">
-                  {tx.type === "TRANSFER"
-                    ? (locale === "ru" ? "Счёт (откуда)" : "From account")
-                    : (locale === "ru" ? "Счёт" : "Account")}
-                </label>
-                <select
-                  value={effectiveAccountId ?? ""}
-                  onChange={(e) => onUpdateOverride({ accountId: e.target.value })}
-                  className="h-8 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
-                >
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>{a.name} ({a.currency})</option>
-                  ))}
-                </select>
-              </div>
+              <AccountPicker
+                accounts={accounts}
+                value={effectiveAccountId ?? undefined}
+                onChange={(id) => onUpdateOverride({ accountId: id })}
+                label={tx.type === "TRANSFER"
+                  ? (locale === "ru" ? "Счёт (откуда)" : "From account")
+                  : (locale === "ru" ? "Счёт" : "Account")}
+              />
             )}
           </div>
 
           {tx.type === "TRANSFER" && accounts.length > 1 && (
-            <div>
-              <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[rgb(var(--muted))]">
-                {locale === "ru" ? "Счёт (куда)" : "To account"}
-              </label>
-              <select
-                value={override?.toAccountId ?? ""}
-                onChange={(e) => onUpdateOverride({ toAccountId: e.target.value || null })}
-                className="h-8 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
-              >
-                <option value="">— {locale === "ru" ? "выберите счёт" : "select account"} —</option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name} ({a.currency})</option>
-                ))}
-              </select>
-            </div>
+            <AccountPicker
+              accounts={accounts.filter((a) => a.id !== effectiveAccountId)}
+              value={override?.toAccountId ?? undefined}
+              onChange={(id) => onUpdateOverride({ toAccountId: id })}
+              label={locale === "ru" ? "Счёт (куда)" : "To account"}
+            />
           )}
         </div>
       )}

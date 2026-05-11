@@ -16,6 +16,8 @@ export type LucaAccount = {
   name: string;
   currency: string;
   currentBalance: string;
+  type?: string;
+  isDebt?: boolean;
 };
 
 const WORKSPACE_KEY = "luca-workspace-id";

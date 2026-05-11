@@ -37,6 +37,7 @@ navigation:
   accounts: "Accounts"
   categories: "Categories"
   budget: "Budget"
+  exchangeRates: "Exchange Rates"
 
 chat:
   title: "LUCA Chat"
@@ -178,6 +179,19 @@ categories:
   expense: "Expense"
   defaultBadge: "Default"
   deleteConfirm: "Delete this category?"
+
+exchangeRates:
+  title: "Exchange Rates"
+  subtitle: "Live market rates from open.er-api.com."
+  updated: "Updated"
+  refresh: "Refresh"
+  converter: "Currency Converter"
+  from: "From"
+  to: "To"
+  currency: "Currency"
+  search: "Search currencies..."
+  loading: "Loading rates..."
+  error: "Failed to load rates. Check connection."
 
 budget:
   title: "Budget"

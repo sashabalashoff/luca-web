@@ -3,8 +3,12 @@
 import { apiFetch } from "@/shared/api/client";
 import { useI18n } from "@/shared/i18n/i18n-provider";
 import { useLuca } from "@/shared/providers/luca-provider";
+import { AccountPicker } from "@/shared/ui/account-picker";
+import { AmountInput } from "@/shared/ui/amount-input";
+import { Modal } from "@/shared/ui/modal";
 import {
   ArrowDownIcon,
+  ArrowRightIcon,
   ArrowUpIcon,
   ArrowsLeftRightIcon,
   CalendarBlankIcon,
@@ -108,7 +112,7 @@ export function TransactionsPageClient() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [savingTx, setSavingTx] = useState(false);
   const [addForm, setAddForm] = useState({
-    type: "EXPENSE" as "INCOME" | "EXPENSE",
+    type: "EXPENSE" as "INCOME" | "EXPENSE" | "TRANSFER",
     amount: "",
     currency: "",
     categoryId: "",
@@ -116,7 +120,11 @@ export function TransactionsPageClient() {
     comment: "",
     date: todayIso,
     accountId: "",
+    toAccountId: "",
   });
+  // Multi-currency: base currency equivalent (display only, auto-calculated)
+  const [baseEquivalent, setBaseEquivalent] = useState("");
+  const [fetchingRate, setFetchingRate] = useState(false);
 
   function buildQuery(cursor?: string) {
     const p = new URLSearchParams({ workspaceId: workspace!.id, limit: "50" });
@@ -191,6 +199,35 @@ export function TransactionsPageClient() {
     }
   }, [defaultAccount]);
 
+  // Multi-currency: fetch exchange rate and auto-calculate base equivalent
+  const selectedAccount = accounts.find((a) => a.id === addForm.accountId);
+  const isCrossRate = !!(
+    selectedAccount &&
+    workspace &&
+    selectedAccount.currency !== workspace.baseCurrency
+  );
+
+  useEffect(() => {
+    if (!isCrossRate || !addForm.amount || !workspace || !selectedAccount) {
+      setBaseEquivalent("");
+      return;
+    }
+    const n = parseFloat(addForm.amount);
+    if (isNaN(n) || n === 0) { setBaseEquivalent(""); return; }
+
+    setFetchingRate(true);
+    apiFetch<{ rates: Record<string, number> }>(
+      `/api/exchange-rates?base=${selectedAccount.currency}`
+    )
+      .then((res) => {
+        const rate = res.rates[workspace.baseCurrency];
+        if (rate) setBaseEquivalent((n * rate).toFixed(2));
+        else setBaseEquivalent("");
+      })
+      .catch(() => setBaseEquivalent(""))
+      .finally(() => setFetchingRate(false));
+  }, [addForm.amount, addForm.accountId, isCrossRate]);
+
   async function deleteTransaction(id: string) {
     setDeletingId(id);
     setConfirmDeleteId(null);
@@ -214,6 +251,8 @@ export function TransactionsPageClient() {
       accounts.find((a) => a.id === accountId)?.currency ||
       workspace.baseCurrency;
 
+    if (addForm.type === "TRANSFER" && !addForm.toAccountId) return;
+
     setSavingTx(true);
     try {
       const tx = await apiFetch<{ transaction: Transaction }>("/api/transactions", {
@@ -221,6 +260,7 @@ export function TransactionsPageClient() {
         body: JSON.stringify({
           workspaceId: workspace.id,
           accountId,
+          toAccountId: addForm.type === "TRANSFER" ? addForm.toAccountId || null : null,
           type: addForm.type,
           amount: Number(addForm.amount),
           currency,
@@ -241,7 +281,9 @@ export function TransactionsPageClient() {
         comment: "",
         date: todayIso,
         accountId: defaultAccount?.id ?? "",
+        toAccountId: "",
       });
+      setBaseEquivalent("");
       setTransactions((prev) => [tx.transaction, ...prev]);
       reloadContext();
     } catch (err) {
@@ -279,106 +321,162 @@ export function TransactionsPageClient() {
           <p className="mt-0.5 text-sm text-[rgb(var(--muted))]">{t("transactions.subtitle")}</p>
         </div>
         <button
-          onClick={() => setShowAddForm((v) => !v)}
+          onClick={() => setShowAddForm(true)}
           className="flex items-center gap-1.5 rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2 text-sm font-medium text-[rgb(var(--foreground))] transition hover:bg-[rgb(var(--surface-soft))] active:scale-[0.97]"
         >
-          {showAddForm ? <XIcon size={14} weight="bold" /> : <PlusIcon size={14} weight="bold" />}
+          <PlusIcon size={14} weight="bold" />
           {t("transactions.new")}
         </button>
       </div>
 
-      {/* Add form */}
-      {showAddForm && (
-        <div className="mb-5 overflow-hidden rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
-          <div className="border-b border-[rgb(var(--border-soft))] px-5 py-3.5">
-            <span className="text-sm font-semibold">{t("transactions.addTitle")}</span>
+      {/* Add Transaction Modal */}
+      <Modal
+        open={showAddForm}
+        onClose={() => setShowAddForm(false)}
+        title={t("transactions.addTitle")}
+        maxWidth="md"
+        footer={
+          <button
+            onClick={createTransaction}
+            disabled={savingTx || !addForm.amount || (addForm.type === "TRANSFER" && !addForm.toAccountId)}
+            className="h-11 w-full rounded-xl bg-[rgb(var(--foreground))] text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85 disabled:opacity-40"
+          >
+            {savingTx ? t("common.loading") : t("common.save")}
+          </button>
+        }
+      >
+        <div className="space-y-4">
+          {/* Type tabs */}
+          <div className="flex gap-1.5 rounded-xl bg-[rgb(var(--surface-soft))] p-1">
+            {(["EXPENSE", "INCOME", "TRANSFER"] as const).map((tp) => (
+              <button
+                key={tp}
+                type="button"
+                onClick={() => setAddForm((f) => ({ ...f, type: tp, categoryId: "", toAccountId: "" }))}
+                className={[
+                  "flex-1 rounded-lg py-1.5 text-xs font-medium transition",
+                  addForm.type === tp
+                    ? tp === "EXPENSE"
+                      ? "bg-[rgb(var(--negative))] text-white shadow-sm"
+                      : tp === "INCOME"
+                      ? "bg-[rgb(var(--positive))] text-white shadow-sm"
+                      : "bg-[rgb(var(--foreground))] text-[rgb(var(--background))] shadow-sm"
+                    : "text-[rgb(var(--muted))] hover:text-[rgb(var(--foreground))]",
+                ].join(" ")}
+              >
+                {tp === "EXPENSE" ? t("transactions.expense") : tp === "INCOME" ? t("transactions.income") : t("transactions.transfer")}
+              </button>
+            ))}
           </div>
-          <div className="space-y-4 p-5">
-            {/* Type selector */}
-            <div className="flex gap-2">
-              {(["EXPENSE", "INCOME"] as const).map((tp) => (
-                <button
-                  key={tp}
-                  onClick={() => setAddForm((f) => ({ ...f, type: tp, categoryId: "" }))}
-                  className={[
-                    "flex-1 rounded-lg border py-2 text-sm font-medium transition",
-                    addForm.type === tp
-                      ? tp === "EXPENSE"
-                        ? "border-[rgb(var(--negative))] bg-[rgb(var(--negative-dim))] text-[rgb(var(--negative))]"
-                        : "border-[rgb(var(--positive))] bg-[rgb(var(--positive-dim))] text-[rgb(var(--positive))]"
-                      : "border-[rgb(var(--border))] text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))]",
-                  ].join(" ")}
-                >
-                  {tp === "EXPENSE" ? t("transactions.expense") : t("transactions.income")}
-                </button>
-              ))}
-            </div>
 
-            {/* Amount + Currency */}
-            <div className="grid grid-cols-[1fr_120px] gap-3">
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
-                  {t("transactions.amount")}
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={addForm.amount}
-                  onChange={(e) => setAddForm((f) => ({ ...f, amount: e.target.value }))}
-                  placeholder="0.00"
-                  className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))] focus:ring-2 focus:ring-[rgb(var(--accent)/0.12)]"
-                />
+          {/* Account picker */}
+          {accounts.length > 0 && (
+            <AccountPicker
+              accounts={accounts}
+              value={addForm.accountId}
+              onChange={(id) => {
+                const acc = accounts.find((a) => a.id === id);
+                setAddForm((f) => ({ ...f, accountId: id, currency: acc?.currency ?? f.currency }));
+              }}
+              label={addForm.type === "TRANSFER" ? "From account" : "Account"}
+            />
+          )}
+
+          {/* To account (transfer only) */}
+          {addForm.type === "TRANSFER" && accounts.length > 1 && (
+            <AccountPicker
+              accounts={accounts.filter((a) => a.id !== addForm.accountId)}
+              value={addForm.toAccountId}
+              onChange={(id) => setAddForm((f) => ({ ...f, toAccountId: id }))}
+              label="To account"
+            />
+          )}
+
+          {/* Amount */}
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
+              {t("transactions.amount")}
+              {selectedAccount && (
+                <span className="ml-1 font-normal text-[rgb(var(--muted-soft))]">
+                  ({selectedAccount.currency})
+                </span>
+              )}
+            </label>
+            <AmountInput
+              value={addForm.amount}
+              onChange={(v) => setAddForm((f) => ({ ...f, amount: v }))}
+              currency={selectedAccount?.currency ?? addForm.currency}
+              placeholder="0.00"
+            />
+            {/* Cross-rate equivalent */}
+            {isCrossRate && addForm.amount && (
+              <div className="mt-1.5 flex items-center gap-1.5 text-xs text-[rgb(var(--muted))]">
+                <ArrowRightIcon size={11} />
+                {fetchingRate ? (
+                  <span>Calculating...</span>
+                ) : baseEquivalent ? (
+                  <span>
+                    ≈ <span className="font-semibold text-[rgb(var(--foreground))]">{baseEquivalent} {workspace?.baseCurrency}</span>
+                  </span>
+                ) : null}
               </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
-                  Currency
-                </label>
-                <select
-                  value={addForm.currency}
-                  onChange={(e) => setAddForm((f) => ({ ...f, currency: e.target.value }))}
-                  className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
-                >
-                  {COMMON_CURRENCIES.map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
+            )}
+          </div>
+
+          {/* Category grid — capped, scrollable if many */}
+          {filteredCategories.length > 0 && (
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">Category</label>
+              <div className="relative">
+                <div className="max-h-[108px] overflow-y-auto rounded-lg border border-[rgb(var(--border-soft))] p-1.5">
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setAddForm((f) => ({ ...f, categoryId: "" }))}
+                      className={[
+                        "rounded-lg border px-2.5 py-1 text-xs transition",
+                        !addForm.categoryId
+                          ? "border-[rgb(var(--foreground))] bg-[rgb(var(--foreground))] text-[rgb(var(--background))]"
+                          : "border-[rgb(var(--border))] text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))]",
+                      ].join(" ")}
+                    >
+                      None
+                    </button>
+                    {filteredCategories.map((cat) => (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onClick={() => setAddForm((f) => ({ ...f, categoryId: cat.id }))}
+                        className={[
+                          "flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs transition",
+                          addForm.categoryId === cat.id
+                            ? "border-[rgb(var(--accent))] bg-[rgb(var(--accent)/0.1)] text-[rgb(var(--accent))]"
+                            : "border-[rgb(var(--border))] text-[rgb(var(--foreground))] hover:bg-[rgb(var(--surface-soft))]",
+                        ].join(" ")}
+                      >
+                        {cat.icon && <span className="text-sm leading-none">{cat.icon}</span>}
+                        {cat.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
+          )}
 
-            {/* Date */}
+          {/* Date + Merchant row */}
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
                 {t("transactions.dateLabel")}
               </label>
               <input
                 type="date"
-                value={addForm.date}
+                value={addForm.date.slice(0, 10)}
                 onChange={(e) => setAddForm((f) => ({ ...f, date: e.target.value }))}
                 className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))] focus:ring-2 focus:ring-[rgb(var(--accent)/0.12)]"
               />
             </div>
-
-            {/* Category */}
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
-                Category
-              </label>
-              <select
-                value={addForm.categoryId}
-                onChange={(e) => setAddForm((f) => ({ ...f, categoryId: e.target.value }))}
-                className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
-              >
-                <option value="">— no category —</option>
-                {filteredCategories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.icon ? `${c.icon} ` : ""}{c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Merchant */}
             <div>
               <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
                 {t("transactions.merchantLabel")}
@@ -390,52 +488,23 @@ export function TransactionsPageClient() {
                 className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))] focus:ring-2 focus:ring-[rgb(var(--accent)/0.12)]"
               />
             </div>
-
-            {/* Account */}
-            {accounts.length > 1 && (
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
-                  Account
-                </label>
-                <select
-                  value={addForm.accountId}
-                  onChange={(e) => {
-                    const acc = accounts.find((a) => a.id === e.target.value);
-                    setAddForm((f) => ({
-                      ...f,
-                      accountId: e.target.value,
-                      currency: acc?.currency ?? f.currency,
-                    }));
-                  }}
-                  className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
-                >
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name} ({a.currency})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            <div className="flex gap-2 pt-1">
-              <button
-                onClick={createTransaction}
-                disabled={savingTx || !addForm.amount}
-                className="flex-1 rounded-lg bg-[rgb(var(--foreground))] py-2.5 text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85 disabled:opacity-40"
-              >
-                {savingTx ? t("common.loading") : t("common.save")}
-              </button>
-              <button
-                onClick={() => setShowAddForm(false)}
-                className="rounded-lg border border-[rgb(var(--border))] px-4 py-2.5 text-sm text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))]"
-              >
-                {t("common.cancel")}
-              </button>
-            </div>
           </div>
+
+          {/* Note */}
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
+              {t("transactions.comment")}
+            </label>
+            <input
+              value={addForm.comment}
+              onChange={(e) => setAddForm((f) => ({ ...f, comment: e.target.value }))}
+              placeholder="Optional note..."
+              className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))] focus:ring-2 focus:ring-[rgb(var(--accent)/0.12)]"
+            />
+          </div>
+
         </div>
-      )}
+      </Modal>
 
       {/* Search + filter bar */}
       <div className="mb-3 space-y-2">
