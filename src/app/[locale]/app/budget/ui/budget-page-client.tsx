@@ -45,11 +45,6 @@ type BudgetForm = {
   currency: string;
 };
 
-const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
-
 const COMMON_CURRENCIES = ["USD", "EUR", "RUB", "GBP", "AED", "CNY", "JPY", "TRY", "KZT", "UAH"];
 
 const now = new Date();
@@ -76,8 +71,15 @@ function ProgressBar({ pct, over }: { pct: number; over: boolean }) {
   );
 }
 
+function getMonthName(month: number, locale: string): string {
+  return new Date(2024, month - 1, 1).toLocaleString(
+    locale === "ru" ? "ru-RU" : "en-US",
+    { month: "long" }
+  );
+}
+
 export function BudgetPageClient() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { workspace } = useLuca();
 
   const [year, setYear] = useState(now.getFullYear());
@@ -222,14 +224,14 @@ export function BudgetPageClient() {
             onChange={(e) => setMonth(Number(e.target.value))}
             className="h-8 rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-2 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
           >
-            {MONTH_NAMES.map((name, idx) => (
-              <option key={idx + 1} value={idx + 1}>{name}</option>
+            {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+              <option key={m} value={m}>{getMonthName(m, locale)}</option>
             ))}
           </select>
         </div>
         {isCurrentMonth && (
           <span className="rounded-full bg-[rgb(var(--accent)/0.1)] px-2 py-0.5 text-xs font-medium text-[rgb(var(--accent))]">
-            Current
+            {t("budget.current")}
           </span>
         )}
       </div>
@@ -282,7 +284,7 @@ export function BudgetPageClient() {
               </div>
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
-                  Currency
+                  {t("budget.currency")}
                 </label>
                 <select
                   value={form.currency}
@@ -313,13 +315,13 @@ export function BudgetPageClient() {
           <div className="flex items-end justify-between">
             <div>
               <div className="text-xs font-medium text-[rgb(var(--muted))]">
-                {MONTH_NAMES[month - 1]} {year} — total
+                {getMonthName(month, locale)} {year} — {t("budget.summaryTotal")}
               </div>
               <div className="mt-1 text-2xl font-bold tabular-nums text-[rgb(var(--foreground))]">
                 {fmt(totalSpent, currency)}
               </div>
               <div className="mt-0.5 text-sm text-[rgb(var(--muted))]">
-                of {fmt(totalBudget, currency)} budgeted
+                {t("budget.of")} {fmt(totalBudget, currency)} {t("budget.ofBudgeted")}
               </div>
             </div>
             <div className="text-right">
@@ -337,8 +339,8 @@ export function BudgetPageClient() {
               </div>
               <div className="text-xs text-[rgb(var(--muted))]">
                 {totalBudget - totalSpent >= 0
-                  ? `${fmt(totalBudget - totalSpent, currency)} left`
-                  : `${fmt(totalSpent - totalBudget, currency)} over`}
+                  ? `${fmt(totalBudget - totalSpent, currency)} ${t("budget.left")}`
+                  : `${fmt(totalSpent - totalBudget, currency)} ${t("budget.over")}`}
               </div>
             </div>
           </div>
@@ -363,7 +365,7 @@ export function BudgetPageClient() {
           </div>
           <p className="text-sm text-[rgb(var(--muted))]">{t("budget.empty")}</p>
           <p className="mt-1 text-xs text-[rgb(var(--muted-soft))]">
-            Set spending limits for your expense categories
+            {t("budget.emptyHint")}
           </p>
         </div>
       ) : (
@@ -500,8 +502,8 @@ export function BudgetPageClient() {
                           <span className="text-[rgb(var(--muted))]">{fmt(limit, budget.currency)}</span>
                           <span className="ml-auto text-xs tabular-nums text-[rgb(var(--muted))]">
                             {remaining >= 0
-                              ? `${fmt(remaining, budget.currency)} left`
-                              : `${fmt(-remaining, budget.currency)} over`}
+                              ? `${fmt(remaining, budget.currency)} ${t("budget.left")}`
+                              : `${fmt(-remaining, budget.currency)} ${t("budget.over")}`}
                           </span>
                         </div>
 

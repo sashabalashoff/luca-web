@@ -15,10 +15,12 @@ type Summary = {
   categoryBreakdown: Array<{ name: string; amount: number }>;
 };
 
-const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
+function getMonthName(month: number, locale: string): string {
+  return new Date(2024, month - 1, 1).toLocaleString(
+    locale === "ru" ? "ru-RU" : "en-US",
+    { month: "long" }
+  );
+}
 
 function getDateRange(year: number, month: number): { dateFrom: string; dateTo: string } {
   const from = new Date(Date.UTC(year, month - 1, 1));
@@ -34,7 +36,7 @@ function fmt(n: number) {
 }
 
 export function ReportsPageClient() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { workspace } = useLuca();
 
   const now = new Date();
@@ -118,8 +120,8 @@ export function ReportsPageClient() {
             onChange={(e) => setMonth(Number(e.target.value))}
             className={selectClass}
           >
-            {MONTHS.map((m, i) => (
-              <option key={i + 1} value={i + 1}>{m}</option>
+            {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+              <option key={m} value={m}>{getMonthName(m, locale)}</option>
             ))}
           </select>
           <select

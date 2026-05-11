@@ -235,7 +235,7 @@ function CategoryModalForm({
         </div>
         <div>
           <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
-            Preview
+            {t("categories.previewLabel")}
           </label>
           <div
             className="flex h-10 items-center justify-center gap-2 rounded-lg text-sm font-medium text-white"
@@ -365,7 +365,7 @@ function CategoryTreeNode({
           </div>
           {hasChildren && (
             <div className="text-[11px] text-[rgb(var(--muted-soft))]">
-              {children.length} {locale === "ru" ? "подкатегор." : "subcategories"}
+              {children.length} {t("categories.subcategories")}
             </div>
           )}
         </div>
@@ -376,7 +376,7 @@ function CategoryTreeNode({
         {/* Actions */}
         {deleteConfirmId === category.id ? (
           <div className="flex items-center gap-1.5">
-            <span className="text-xs text-[rgb(var(--negative))]">{locale === "ru" ? "Удалить?" : "Delete?"}</span>
+            <span className="text-xs text-[rgb(var(--negative))]">{t("transactions.confirmDeleteQ")}</span>
             <button
               onClick={() => onDeleteConfirm(category.id)}
               className="flex h-6 w-6 items-center justify-center rounded-lg bg-[rgb(var(--negative))] text-white"
@@ -397,7 +397,7 @@ function CategoryTreeNode({
               className="flex h-7 items-center gap-1 rounded-lg border border-[rgb(var(--border))] px-2 text-[10px] font-medium text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
             >
               <PlusIcon size={9} weight="bold" />
-              {locale === "ru" ? "Подкат." : "Sub"}
+              {t("categories.addSub")}
             </button>
             <button
               onClick={() => onEdit(category)}
@@ -520,6 +520,7 @@ export function CategoriesPageClient() {
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [activeType, setActiveType] = useState<"EXPENSE" | "INCOME">("EXPENSE");
 
   // Modal state
@@ -534,9 +535,10 @@ export function CategoriesPageClient() {
   function loadCategories() {
     if (!workspace) return;
     setLoading(true);
+    setLoadError(false);
     apiFetch<{ categories: Category[] }>(`/api/categories?workspaceId=${workspace.id}`)
       .then((r) => setCategories(r.categories))
-      .catch(console.error)
+      .catch((err) => { console.error(err); setLoadError(true); })
       .finally(() => setLoading(false));
   }
 
@@ -613,6 +615,11 @@ export function CategoriesPageClient() {
 
   return (
     <div className="max-w-2xl space-y-5">
+      {loadError && (
+        <div className="rounded-xl border border-[rgb(var(--negative-dim))] bg-[rgb(var(--negative-dim))] px-4 py-3 text-sm text-[rgb(var(--negative))]">
+          {t("common.errorLoading")}
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -701,9 +708,7 @@ export function CategoriesPageClient() {
       <Modal
         open={showModal}
         onClose={() => setShowModal(false)}
-        title={editingCategory
-          ? (locale === "ru" ? "Редактировать категорию" : "Edit category")
-          : (locale === "ru" ? "Новая категория" : "New category")}
+        title={editingCategory ? t("categories.editTitle") : t("categories.newTitle")}
         maxWidth="sm"
         footer={
           <button

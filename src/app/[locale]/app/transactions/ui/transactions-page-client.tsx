@@ -52,18 +52,19 @@ type Filter = "ALL" | "INCOME" | "EXPENSE" | "TRANSFER";
 
 const COMMON_CURRENCIES = ["USD", "EUR", "RUB", "GBP", "AED", "CNY", "JPY", "TRY", "KZT", "UAH", "BTC", "ETH"];
 
-function groupByDay(txs: Transaction[]): DayGroup[] {
+function groupByDay(txs: Transaction[], locale: string): DayGroup[] {
   const map = new Map<string, Transaction[]>();
   for (const tx of txs) {
     const key = tx.date.slice(0, 10);
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(tx);
   }
+  const dateLocale = locale === "ru" ? "ru-RU" : "en-US";
   return Array.from(map.entries())
     .sort((a, b) => b[0].localeCompare(a[0]))
     .map(([iso, items]) => ({
       iso,
-      label: new Date(iso + "T12:00:00").toLocaleDateString(undefined, {
+      label: new Date(iso + "T12:00:00").toLocaleDateString(dateLocale, {
         weekday: "long",
         month: "long",
         day: "numeric",
@@ -107,6 +108,7 @@ export function TransactionsPageClient() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
 
   // Add form
   const [showAddForm, setShowAddForm] = useState(false);
@@ -142,6 +144,7 @@ export function TransactionsPageClient() {
   function loadTransactions() {
     if (!workspace) return;
     setLoading(true);
+    setLoadError(false);
     setNextCursor(null);
     apiFetch<{ transactions: Transaction[]; nextCursor: string | null; hasMore: boolean }>(buildQuery())
       .then((r) => {
@@ -149,7 +152,7 @@ export function TransactionsPageClient() {
         setNextCursor(r.nextCursor);
         setHasMore(r.hasMore);
       })
-      .catch(console.error)
+      .catch((err) => { console.error(err); setLoadError(true); })
       .finally(() => setLoading(false));
   }
 
@@ -310,7 +313,7 @@ export function TransactionsPageClient() {
     setEditingId(null);
   }
 
-  const groups = groupByDay(transactions);
+  const groups = groupByDay(transactions, locale);
   const isSpinning = bootstrapLoading || loading;
 
   const hasActiveFilters = !!(dateFrom || dateTo || filterAccountId || filterCategoryId || debouncedSearch);
@@ -326,6 +329,11 @@ export function TransactionsPageClient() {
 
   return (
     <div className="max-w-2xl">
+      {loadError && (
+        <div className="mb-4 rounded-xl border border-[rgb(var(--negative-dim))] bg-[rgb(var(--negative-dim))] px-4 py-3 text-sm text-[rgb(var(--negative))]">
+          {t("common.errorLoading")}
+        </div>
+      )}
       {/* Header */}
       <div className="mb-5 flex items-center justify-between">
         <div>
@@ -595,7 +603,7 @@ export function TransactionsPageClient() {
             ].join(" ")}
           >
             <FunnelSimpleIcon size={14} />
-            Filters
+            {t("transactions.filters")}
             {hasActiveFilters && (
               <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[rgb(var(--accent))] text-[9px] font-bold text-white">
                 {[dateFrom || dateTo ? 1 : 0, filterAccountId ? 1 : 0, filterCategoryId ? 1 : 0, debouncedSearch ? 1 : 0].reduce((a, b) => a + b, 0)}
@@ -611,7 +619,7 @@ export function TransactionsPageClient() {
               <div>
                 <label className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">
                   <CalendarBlankIcon size={11} className="mr-1 inline" />
-                  From
+                  {t("transactions.dateFrom")}
                 </label>
                 <input
                   type="date"
@@ -623,7 +631,7 @@ export function TransactionsPageClient() {
               <div>
                 <label className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">
                   <CalendarBlankIcon size={11} className="mr-1 inline" />
-                  To
+                  {t("transactions.dateTo")}
                 </label>
                 <input
                   type="date"
@@ -636,13 +644,13 @@ export function TransactionsPageClient() {
               {/* Account filter */}
               {accounts.length > 1 && (
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">Account</label>
+                  <label className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">{t("transactions.account")}</label>
                   <select
                     value={filterAccountId}
                     onChange={(e) => setFilterAccountId(e.target.value)}
                     className="h-9 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none focus:border-[rgb(var(--accent))]"
                   >
-                    <option value="">All accounts</option>
+                    <option value="">{t("transactions.allAccounts")}</option>
                     {accounts.map((a) => (
                       <option key={a.id} value={a.id}>{a.name}</option>
                     ))}
@@ -652,13 +660,13 @@ export function TransactionsPageClient() {
 
               {/* Category filter */}
               <div>
-                <label className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">Category</label>
+                <label className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">{t("transactions.category")}</label>
                 <select
                   value={filterCategoryId}
                   onChange={(e) => setFilterCategoryId(e.target.value)}
                   className="h-9 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none focus:border-[rgb(var(--accent))]"
                 >
-                  <option value="">All categories</option>
+                  <option value="">{t("transactions.allCategories")}</option>
                   {categories.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.icon ? `${c.icon} ` : ""}{c.name}
@@ -675,7 +683,7 @@ export function TransactionsPageClient() {
                 }}
                 className="mt-3 text-xs text-[rgb(var(--muted))] hover:text-[rgb(var(--negative))] transition"
               >
-                Clear all filters
+                {t("transactions.clearFilters")}
               </button>
             )}
           </div>
@@ -737,7 +745,7 @@ export function TransactionsPageClient() {
               onClick={() => { setSearch(""); setDateFrom(""); setDateTo(""); setFilterAccountId(""); setFilterCategoryId(""); }}
               className="mt-3 text-xs text-[rgb(var(--accent))] hover:underline"
             >
-              Clear filters
+              {t("transactions.clearFilters")}
             </button>
           )}
         </div>
@@ -781,7 +789,7 @@ export function TransactionsPageClient() {
                 disabled={loadingMore}
                 className="rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-6 py-2.5 text-sm font-medium text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] disabled:opacity-50"
               >
-                {loadingMore ? "Loading..." : "Load more"}
+                {loadingMore ? t("transactions.loadingMore") : t("transactions.loadMore")}
               </button>
             </div>
           )}
@@ -997,7 +1005,7 @@ function TxRow({
           <div className="grid grid-cols-2 gap-3">
             {/* Amount + currency */}
             <div>
-              <label className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">Amount</label>
+              <label className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">{t("transactions.amount")}</label>
               <input
                 type="number"
                 min="0"
@@ -1008,7 +1016,7 @@ function TxRow({
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">Currency</label>
+              <label className="mb-1 block text-xs font-medium text-[rgb(var(--muted))]">{t("transactions.currency")}</label>
               <select
                 value={editForm.currency}
                 onChange={(e) => setEditForm((f) => ({ ...f, currency: e.target.value }))}

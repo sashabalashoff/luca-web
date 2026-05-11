@@ -11,6 +11,7 @@ common:
   logout: "Log out"
   darkMode: "Dark mode"
   lightMode: "Light mode"
+  errorLoading: "Failed to load data. Please refresh the page."
 
 landing:
   badge: "AI-first financial workspace"
@@ -41,10 +42,14 @@ navigation:
 
 chat:
   title: "LUCA Chat"
-  subtitle: "Your AI CFO — ask anything about your finances."
-  placeholder: "Tell me what happened with your money..."
+  subtitle: "Your AI assistant — ask anything about your finances."
+  placeholder: "Ask LUCA..."
   intro: "Ask me anything about your finances or tell me about a transaction."
-  thinking: "LUCA is thinking..."
+  welcome: "How can I help?"
+  thinking: "Thinking..."
+  listening: "Listening..."
+  rejected: "Rejected"
+  enterHint: "Enter to send"
   confirmAndSave: "Confirm"
   saved: "Saved"
   defaultAccount: "Default account"
@@ -73,6 +78,7 @@ chat:
   noDeadline: "No deadline"
   startRecording: "Start voice input"
   stopRecording: "Stop recording"
+  currency: "Currency"
 
 dashboard:
   title: "Dashboard"
@@ -85,6 +91,7 @@ dashboard:
   noData: "No expense data yet."
   accounts: "Account balances"
   noAccounts: "No accounts yet."
+  total: "Total"
 
 transactions:
   title: "Transactions"
@@ -101,6 +108,17 @@ transactions:
   comment: "Comment"
   dateLabel: "Date"
   confirmDeleteQ: "Delete?"
+  filters: "Filters"
+  dateFrom: "From"
+  dateTo: "To"
+  account: "Account"
+  allAccounts: "All accounts"
+  category: "Category"
+  allCategories: "All categories"
+  clearFilters: "Clear filters"
+  currency: "Currency"
+  loadMore: "Load more"
+  loadingMore: "Loading..."
 
 reports:
   title: "Reports"
@@ -181,6 +199,11 @@ categories:
   expense: "Expense"
   defaultBadge: "Default"
   deleteConfirm: "Delete this category?"
+  previewLabel: "Preview"
+  editTitle: "Edit category"
+  newTitle: "New category"
+  subcategories: "subcategories"
+  addSub: "Sub"
 
 exchangeRates:
   title: "Exchange Rates"
@@ -199,6 +222,7 @@ budget:
   title: "Budget"
   subtitle: "Set monthly spending targets."
   empty: "No budgets for this period."
+  emptyHint: "Set spending limits for your expense categories."
   add: "Add budget"
   category: "Category"
   allCategories: "All categories"
@@ -212,3 +236,9 @@ budget:
   deleteConfirm: "Delete this budget?"
   spent: "Spent"
   of: "of"
+  current: "Current"
+  summaryTotal: "total"
+  ofBudgeted: "budgeted"
+  left: "left"
+  over: "over"
+  currency: "Currency"

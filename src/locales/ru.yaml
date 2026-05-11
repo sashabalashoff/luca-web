@@ -11,6 +11,7 @@ common:
   logout: "Выйти"
   darkMode: "Тёмная тема"
   lightMode: "Светлая тема"
+  errorLoading: "Не удалось загрузить данные. Обновите страницу."
 
 landing:
   badge: "AI-first финансовое пространство"
@@ -41,10 +42,10 @@ navigation:
 
 chat:
   title: "LUCA Chat"
-  subtitle: "Твой AI CFO — спроси всё о своих финансах."
-  placeholder: "Расскажи, что произошло с деньгами..."
+  subtitle: "Твой финансовый AI — спроси все о своих финансах."
+  placeholder: "Спроси LUCA..."
   intro: "Спроси что-нибудь о финансах или расскажи о транзакции."
-  thinking: "LUCA думает..."
+  thinking: "Думаю..."
   confirmAndSave: "Подтвердить"
   saved: "Сохранено"
   defaultAccount: "Основной счёт"
@@ -73,6 +74,11 @@ chat:
   noDeadline: "Без дедлайна"
   startRecording: "Голосовой ввод"
   stopRecording: "Остановить запись"
+  welcome: "Чем могу помочь?"
+  listening: "Слушаю..."
+  rejected: "Отклонено"
+  enterHint: "Enter для отправки"
+  currency: "Валюта"
 
 dashboard:
   title: "Дашборд"
@@ -85,6 +91,7 @@ dashboard:
   noData: "Данных по расходам пока нет."
   accounts: "Балансы счетов"
   noAccounts: "Счетов пока нет."
+  total: "Итого"
 
 transactions:
   title: "Транзакции"
@@ -101,6 +108,17 @@ transactions:
   comment: "Комментарий"
   dateLabel: "Дата"
   confirmDeleteQ: "Удалить?"
+  filters: "Фильтры"
+  dateFrom: "От"
+  dateTo: "До"
+  account: "Счёт"
+  allAccounts: "Все счета"
+  category: "Категория"
+  allCategories: "Все категории"
+  clearFilters: "Сбросить фильтры"
+  currency: "Валюта"
+  loadMore: "Загрузить ещё"
+  loadingMore: "Загрузка..."
 
 reports:
   title: "Отчёты"
@@ -181,6 +199,11 @@ categories:
   expense: "Расходы"
   defaultBadge: "По умолчанию"
   deleteConfirm: "Удалить категорию?"
+  previewLabel: "Превью"
+  editTitle: "Редактировать категорию"
+  newTitle: "Новая категория"
+  subcategories: "подкатег."
+  addSub: "Подкат."
 
 exchangeRates:
   title: "Курсы валют"
@@ -199,6 +222,7 @@ budget:
   title: "Бюджет"
   subtitle: "Установка лимитов расходов."
   empty: "Бюджетов за этот период нет."
+  emptyHint: "Установи лимиты расходов по категориям."
   add: "Добавить бюджет"
   category: "Категория"
   allCategories: "Все категории"
@@ -212,3 +236,9 @@ budget:
   deleteConfirm: "Удалить бюджет?"
   spent: "Потрачено"
   of: "из"
+  current: "Текущий"
+  summaryTotal: "итого"
+  ofBudgeted: "запланировано"
+  left: "осталось"
+  over: "перерасход"
+  currency: "Валюта"

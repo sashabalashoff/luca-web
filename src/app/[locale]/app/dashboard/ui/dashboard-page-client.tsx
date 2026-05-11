@@ -50,12 +50,13 @@ export function DashboardPageClient() {
   const { workspace, accounts, transactionKey } = useLuca();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     if (!workspace) return;
     let active = true;
     async function fetchData() {
-      if (active) setLoading(true);
+      if (active) { setLoading(true); setLoadError(false); }
       try {
         const data = await apiFetch<Summary>(
           `/api/reports/monthly-summary?workspaceId=${workspace!.id}`
@@ -63,6 +64,7 @@ export function DashboardPageClient() {
         if (active) setSummary(data);
       } catch (err) {
         console.error(err);
+        if (active) setLoadError(true);
       } finally {
         if (active) setLoading(false);
       }
@@ -86,6 +88,11 @@ export function DashboardPageClient() {
 
   return (
     <div className="max-w-4xl space-y-6">
+      {loadError && (
+        <div className="rounded-xl border border-[rgb(var(--negative-dim))] bg-[rgb(var(--negative-dim))] px-4 py-3 text-sm text-[rgb(var(--negative))]">
+          {t("common.errorLoading")}
+        </div>
+      )}
       {/* ── Account balances ── */}
       {accounts.length > 0 && (
         <div>
@@ -118,7 +125,7 @@ export function DashboardPageClient() {
                     <ArrowsHorizontalIcon size={14} className="text-[rgb(var(--accent))]" />
                   </div>
                   <span className="truncate text-xs font-medium text-[rgb(var(--accent))]">
-                    Total
+                    {t("dashboard.total")}
                   </span>
                 </div>
                 <div className="text-base font-semibold tabular-nums text-[rgb(var(--accent))]">

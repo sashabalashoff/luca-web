@@ -23,12 +23,12 @@ import {
   SlidersIcon,
   StopCircleIcon,
   TargetIcon,
-  XIcon,
+  XIcon
 } from "@phosphor-icons/react/dist/ssr";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type TransactionOverride = {
   accountId?: string;
@@ -60,6 +60,19 @@ type Message = {
 };
 
 const INTRO_ID = "intro";
+
+const EXAMPLE_PROMPTS_EN = [
+  "Spent $42 on groceries",
+  "Received salary $3000",
+  "Paid rent $800 from card",
+  "Coffee $5, lunch $12",
+];
+const EXAMPLE_PROMPTS_RU = [
+  "Потратил 500₽ на продукты",
+  "Получил зарплату 80 000₽",
+  "Оплатил аренду 30 000₽",
+  "Кофе 250₽, обед 600₽",
+];
 
 function extractOperations(payloadJson: Record<string, unknown>): AiOperation[] {
   if (Array.isArray(payloadJson.operations) && payloadJson.operations.length > 0) {
@@ -107,7 +120,7 @@ export function ChatPageClient() {
 
     function onKeyDown(e: KeyboardEvent) {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key.length !== 1) return; // skip Enter, Escape, F-keys, etc.
+      if (e.key.length !== 1) return;
       const active = document.activeElement;
       if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
       textareaRef.current?.focus();
@@ -117,7 +130,7 @@ export function ChatPageClient() {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  // When sessionId disappears (user starts new chat), reset to intro — React derived-state pattern
+  // When sessionId disappears (user starts new chat), reset to intro
   const [trackedSessionId, setTrackedSessionId] = useState(sessionId);
   if (trackedSessionId !== sessionId) {
     setTrackedSessionId(sessionId);
@@ -128,7 +141,6 @@ export function ChatPageClient() {
 
   useEffect(() => {
     if (!workspace || !sessionId) return;
-
     if (sessionWasCreatedByUs.current.has(sessionId)) return;
 
     setHistoryLoading(true);
@@ -168,7 +180,7 @@ export function ChatPageClient() {
 
   function growTextarea(el: HTMLTextAreaElement) {
     el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 180) + "px";
+    el.style.height = Math.min(el.scrollHeight, 160) + "px";
   }
 
   async function sendMessage(text?: string) {
@@ -188,7 +200,7 @@ export function ChatPageClient() {
     const assistantMsgId = crypto.randomUUID();
 
     setMessages((prev) => [
-      ...prev,
+      ...prev.filter((m) => m.id !== INTRO_ID),
       { id: userMsgId, role: "user", content: msg },
       { id: assistantMsgId, role: "assistant", content: "", streaming: true },
     ]);
@@ -248,10 +260,7 @@ export function ChatPageClient() {
           } else if (eventType === "action") {
             const actionId = payload.actionId as string;
             const operations = (payload.operations as AiOperation[]) ?? [];
-
-            // Build initial overrides: pre-select account based on AI's accountName hint
             const overrides = buildInitialOverrides(operations, accounts, defaultAccount?.id);
-
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsgId
@@ -358,12 +367,7 @@ export function ChatPageClient() {
 
     if (!SR) return;
 
-    // On mobile, Android's Web Speech API fires each word as a new entry in
-    // event.results rather than updating in place, so interim results cause
-    // duplicate accumulation. Disable them on mobile — final-only is reliable.
     const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
-
-    // Blur to prevent Android IME from interfering with programmatic setInput
     if (isMobile) textareaRef.current?.blur();
 
     voiceBaseRef.current = input;
@@ -434,22 +438,42 @@ export function ChatPageClient() {
 
   return (
     <div className="absolute inset-0 flex flex-col overflow-hidden">
+      {/* ── Message area ── */}
       {historyLoading ? (
         <div className="flex flex-1 items-center justify-center">
-          <Dots />
+          <ThinkingIndicator label={t("common.loading")} />
         </div>
       ) : !hasUserMessages ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4">
-          <h2 className="text-2xl font-semibold tracking-tight text-[rgb(var(--foreground))]">
-            {locale === "ru" ? "Чем могу помочь?" : "How can I help?"}
-          </h2>
-          <p className="max-w-sm text-center text-sm text-[rgb(var(--muted))]">
-            {t("chat.subtitle")}
-          </p>
+        /* ── Welcome screen ── */
+        <div className="flex flex-1 flex-col items-center justify-center px-4 pb-4">
+          <div className="w-full max-w-xl">
+            <div className="mb-6 flex flex-col items-center gap-3 text-center">
+              <h2 className="text-2xl font-semibold tracking-tight text-[rgb(var(--foreground))]">
+                {t("chat.welcome")}
+              </h2>
+              <p className="text-sm text-[rgb(var(--muted))]">{t("chat.subtitle")}</p>
+            </div>
+
+            {/* Input in welcome state */}
+            <ChatInput
+              textareaRef={textareaRef}
+              input={input}
+              setInput={setInput}
+              isSending={isSending}
+              isLoading={isLoading}
+              isRecording={isRecording}
+              onSend={() => sendMessage()}
+              onToggleRecording={toggleRecording}
+              onGrow={growTextarea}
+              t={t}
+              locale={locale}
+            />
+          </div>
         </div>
       ) : (
+        /* ── Conversation ── */
         <div className="flex-1 overflow-y-auto thin-scrollbar">
-          <div className="mx-auto max-w-2xl space-y-8 px-4 py-10 lg:px-6">
+          <div className="mx-auto max-w-2xl space-y-4 px-3 py-6 sm:px-4 lg:px-6">
             {messages
               .filter((m) => m.id !== INTRO_ID)
               .map((message) => (
@@ -469,65 +493,125 @@ export function ChatPageClient() {
         </div>
       )}
 
-      <div className="shrink-0 bg-[rgb(var(--background))] pb-[env(safe-area-inset-bottom)]">
-        <div className="mx-auto max-w-2xl px-3 pb-4 pt-2 sm:px-4 sm:pb-5 lg:px-6">
-          <div
-            className={[
-              "flex items-end gap-2 rounded-2xl border bg-[rgb(var(--surface))] px-3 py-2.5 shadow-sm transition-colors sm:px-4 sm:py-3",
-              isRecording
-                ? "border-[rgb(var(--negative))]"
-                : "border-[rgb(var(--border))] focus-within:border-[rgb(var(--accent))]",
-            ].join(" ")}
-          >
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
-                growTextarea(e.target);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  sendMessage();
-                }
-              }}
-              placeholder={
-                isRecording
-                  ? (locale === "ru" ? "Говорите..." : "Listening...")
-                  : t("chat.placeholder")
-              }
-              rows={1}
-              className="flex-1 resize-none bg-transparent py-1 text-sm leading-relaxed outline-none placeholder:text-[rgb(var(--muted))]"
-              style={{ minHeight: "24px", maxHeight: "160px" }}
+      {/* ── Input bar (conversation mode) ── */}
+      {hasUserMessages && (
+        <div className="shrink-0 pb-[env(safe-area-inset-bottom)]">
+          <div className="mx-auto max-w-2xl px-3 py-3 sm:px-4 lg:px-6">
+            <ChatInput
+              textareaRef={textareaRef}
+              input={input}
+              setInput={setInput}
+              isSending={isSending}
+              isLoading={isLoading}
+              isRecording={isRecording}
+              onSend={() => sendMessage()}
+              onToggleRecording={toggleRecording}
+              onGrow={growTextarea}
+              t={t}
+              locale={locale}
             />
-            <button
-              type="button"
-              onClick={toggleRecording}
-              disabled={isSending || isLoading}
-              title={isRecording ? t("chat.stopRecording") : t("chat.startRecording")}
-              className={[
-                "shrink-0 flex h-9 w-9 items-center justify-center rounded-full transition active:scale-95 disabled:pointer-events-none disabled:opacity-40",
-                isRecording
-                  ? "bg-[rgb(var(--negative))] text-white"
-                  : "text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]",
-              ].join(" ")}
-            >
-              {isRecording ? (
-                <StopCircleIcon size={16} weight="fill" />
-              ) : (
-                <MicrophoneIcon size={16} weight="regular" />
-              )}
-            </button>
-            <button
-              onClick={() => sendMessage()}
-              disabled={isSending || !input.trim() || isLoading}
-              className="shrink-0 flex h-9 w-9 items-center justify-center rounded-full bg-[rgb(var(--foreground))] text-[rgb(var(--background))] transition hover:opacity-80 disabled:opacity-20 active:scale-95"
-            >
-              <ArrowUpIcon size={15} weight="bold" />
-            </button>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Chat input ───────────────────────────────────────────────────────────────
+
+function ChatInput({
+  textareaRef,
+  input,
+  setInput,
+  isSending,
+  isLoading,
+  isRecording,
+  onSend,
+  onToggleRecording,
+  onGrow,
+  t,
+  locale,
+}: {
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  input: string;
+  setInput: (v: string) => void;
+  isSending: boolean;
+  isLoading: boolean;
+  isRecording: boolean;
+  onSend: () => void;
+  onToggleRecording: () => void;
+  onGrow: (el: HTMLTextAreaElement) => void;
+  t: (key: string) => string;
+  locale: string;
+}) {
+  return (
+    <div
+      className={[
+        "flex items-end gap-2 rounded-2xl border bg-[rgb(var(--surface))] px-3 py-2 shadow-sm transition-colors sm:px-4",
+        isRecording
+          ? "border-[rgb(var(--negative))]"
+          : "border-[rgb(var(--border))] focus-within:border-[rgb(var(--accent))]",
+      ].join(" ")}
+    >
+      <textarea
+        ref={textareaRef}
+        value={input}
+        onChange={(e) => {
+          setInput(e.target.value);
+          onGrow(e.target);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            onSend();
+          }
+        }}
+        placeholder={isRecording ? t("chat.listening") : t("chat.placeholder")}
+        rows={1}
+        className="flex-1 resize-none bg-transparent text-base leading-relaxed outline-none placeholder:text-[rgb(var(--muted))] sm:text-sm"
+        style={{ minHeight: "28px", maxHeight: "160px" }}
+      />
+
+      <div className="flex shrink-0 items-center gap-1 pb-0.5">
+        <button
+          type="button"
+          onClick={onToggleRecording}
+          disabled={isSending || isLoading}
+          title={isRecording ? t("chat.stopRecording") : t("chat.startRecording")}
+          className={[
+            "flex h-10 w-10 items-center justify-center rounded-full transition active:scale-95 disabled:pointer-events-none disabled:opacity-40 sm:h-9 sm:w-9",
+            isRecording
+              ? "bg-[rgb(var(--negative))] text-white"
+              : "text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]",
+          ].join(" ")}
+        >
+          {isRecording ? (
+            <StopCircleIcon size={18} weight="fill" />
+          ) : (
+            <MicrophoneIcon size={18} weight="regular" />
+          )}
+        </button>
+
+        <button
+          onClick={onSend}
+          disabled={isSending || !input.trim() || isLoading}
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-[rgb(var(--foreground))] text-[rgb(var(--background))] transition hover:opacity-80 disabled:opacity-20 active:scale-95 sm:h-9 sm:w-9"
+          title={t("chat.enterHint")}
+        >
+          {isSending ? (
+            <span className="flex gap-0.5">
+              {[0, 1, 2].map((i) => (
+                <span
+                  key={i}
+                  className="block h-1 w-1 animate-bounce rounded-full bg-current"
+                  style={{ animationDelay: `${i * 120}ms` }}
+                />
+              ))}
+            </span>
+          ) : (
+            <ArrowUpIcon size={15} weight="bold" />
+          )}
+        </button>
       </div>
     </div>
   );
@@ -553,7 +637,6 @@ function buildInitialOverrides(
         if (match) accountId = match.id;
       }
 
-      // For transfers, pre-select a different account as the destination
       let toAccountId: string | undefined;
       if (tx.type === "TRANSFER" && accounts.length > 1) {
         const other = accounts.find((a) => a.id !== accountId);
@@ -566,18 +649,21 @@ function buildInitialOverrides(
   return overrides;
 }
 
-// ─── Loading dots ─────────────────────────────────────────────────────────────
+// ─── Thinking indicator ───────────────────────────────────────────────────────
 
-function Dots() {
+function ThinkingIndicator({ label }: { label?: string }) {
   return (
-    <div className="flex gap-1.5">
-      {[0, 1, 2].map((i) => (
-        <span
-          key={i}
-          className="block h-2 w-2 animate-bounce rounded-full bg-[rgb(var(--muted))]"
-          style={{ animationDelay: `${i * 120}ms` }}
-        />
-      ))}
+    <div className="flex items-center gap-2 text-[rgb(var(--muted))]">
+      <div className="flex gap-1">
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="block h-1.5 w-1.5 animate-bounce rounded-full bg-current"
+            style={{ animationDelay: `${i * 120}ms` }}
+          />
+        ))}
+      </div>
+      {label && <span className="text-xs">{label}</span>}
     </div>
   );
 }
@@ -604,106 +690,105 @@ function MessageRow({
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-[rgb(var(--foreground))] px-4 py-2.5 text-sm leading-relaxed text-[rgb(var(--background))]">
+        <div className="max-w-[78%] rounded-2xl rounded-br-sm bg-[rgb(var(--foreground))] px-4 py-2.5 text-sm leading-relaxed text-[rgb(var(--background))] sm:max-w-[72%]">
           {message.content}
         </div>
       </div>
     );
   }
 
+  // Assistant message
   if (message.streaming && !message.content && !message.action) {
     return (
-      <div className="flex items-center gap-1.5">
-        <Dots />
+      <div className="flex items-start gap-3">
+        <div className="flex min-h-[36px] items-center">
+          <ThinkingIndicator label={t("chat.thinking")} />
+        </div>
       </div>
     );
   }
 
-  // Build flat index for overrides across all tx operations
   let txOverrideIndex = 0;
 
   return (
-    <div className="space-y-3">
-      {message.content && (
-        <p className="whitespace-pre-wrap text-sm leading-relaxed text-[rgb(var(--foreground))]">
-          {message.content}
-          {message.streaming && (
-            <span className="ml-0.5 inline-block h-[13px] w-[2px] animate-pulse bg-[rgb(var(--foreground))] align-middle" />
-          )}
-        </p>
-      )}
+    <div className="flex items-start gap-3">
+      <div className="min-w-0 flex-1 space-y-3">
+        {message.content && (
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-[rgb(var(--foreground))]">
+            {message.content}
+            {message.streaming && (
+              <span className="ml-0.5 inline-block h-[13px] w-[2px] animate-pulse bg-[rgb(var(--foreground))] align-middle" />
+            )}
+          </p>
+        )}
 
-      {/* Pending confirmation */}
-      {message.action && (
-        <div className="space-y-2">
-          {message.action.operations.length > 1 && (
-            <p className="text-xs font-medium text-[rgb(var(--muted))]">
-              {message.action.operations.length} {t("chat.operationsCount")}
-            </p>
-          )}
-          {message.action.operations.map((op, opIdx) => {
-            if (op.type === "CREATE_TRANSACTIONS") {
-              const txOp = op as CreateTransactionsOp;
-              return txOp.transactions.map((tx, txIdx) => {
-                const idx = txOverrideIndex++;
-                const override = message.action!.overrides?.[idx];
-                return (
-                  <TxConfirmCard
-                    key={`${opIdx}-${txIdx}`}
-                    tx={tx}
-                    override={override}
-                    accounts={accounts}
-                    onUpdateOverride={(patch) => onUpdateOverride(message.action!.id, idx, patch)}
-                    t={t}
-                    locale={locale}
-                  />
-                );
-              });
-            }
-            return (
-              <OperationConfirmCard
-                key={opIdx}
-                op={op}
-                t={t}
-                locale={locale}
-              />
-            );
-          })}
-          <div className="flex gap-2 pt-1">
-            <button
-              onClick={() => onConfirm(message.action!.id)}
-              className="flex h-9 items-center gap-2 rounded-lg bg-[rgb(var(--foreground))] px-4 text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85 active:scale-[0.98]"
-            >
-              <CheckIcon size={12} weight="bold" />
-              {message.action.operations.length > 1 ? t("chat.confirmAll") : t("chat.confirmAndSave")}
-            </button>
-            <button
-              onClick={() => onReject(message.action!.id)}
-              className="flex h-9 items-center gap-2 rounded-lg border border-[rgb(var(--border))] px-4 text-sm text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] active:scale-[0.98]"
-            >
-              <XIcon size={12} />
-              {t("chat.reject")}
-            </button>
+        {/* Pending confirmation */}
+        {message.action && (
+          <div className="space-y-2">
+            {message.action.operations.length > 1 && (
+              <p className="text-xs font-medium text-[rgb(var(--muted))]">
+                {message.action.operations.length} {t("chat.operationsCount")}
+              </p>
+            )}
+            {message.action.operations.map((op, opIdx) => {
+              if (op.type === "CREATE_TRANSACTIONS") {
+                const txOp = op as CreateTransactionsOp;
+                return txOp.transactions.map((tx, txIdx) => {
+                  const idx = txOverrideIndex++;
+                  const override = message.action!.overrides?.[idx];
+                  return (
+                    <TxConfirmCard
+                      key={`${opIdx}-${txIdx}`}
+                      tx={tx}
+                      override={override}
+                      accounts={accounts}
+                      onUpdateOverride={(patch) => onUpdateOverride(message.action!.id, idx, patch)}
+                      t={t}
+                      locale={locale}
+                    />
+                  );
+                });
+              }
+              return (
+                <OperationConfirmCard key={opIdx} op={op} t={t} locale={locale} />
+              );
+            })}
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => onConfirm(message.action!.id)}
+                className="flex h-10 items-center gap-2 rounded-xl bg-[rgb(var(--foreground))] px-4 text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85 active:scale-[0.98] sm:h-9"
+              >
+                <CheckIcon size={12} weight="bold" />
+                {message.action.operations.length > 1 ? t("chat.confirmAll") : t("chat.confirmAndSave")}
+              </button>
+              <button
+                onClick={() => onReject(message.action!.id)}
+                className="flex h-10 items-center gap-2 rounded-xl border border-[rgb(var(--border))] px-4 text-sm text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] active:scale-[0.98] sm:h-9"
+              >
+                <XIcon size={12} />
+                {t("chat.reject")}
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Confirmed */}
-      {message.confirmed && message.savedOperations && message.savedOperations.length > 0 && (
-        <div className="space-y-1.5">
-          {message.savedOperations.map((op, i) => (
-            <OperationSavedCard key={i} op={op} t={t} locale={locale} />
-          ))}
-        </div>
-      )}
+        {/* Confirmed */}
+        {message.confirmed && message.savedOperations && message.savedOperations.length > 0 && (
+          <div className="space-y-1.5">
+            {message.savedOperations.map((op, i) => (
+              <OperationSavedCard key={i} op={op} t={t} locale={locale} />
+            ))}
+          </div>
+        )}
 
-      {/* Rejected */}
-      {message.rejected && (
-        <div className="flex items-center gap-2 rounded-xl border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] px-4 py-2.5 text-sm text-[rgb(var(--muted))]">
-          <XIcon size={13} />
-          {locale === "ru" ? "Отклонено" : "Rejected"}
-        </div>
-      )}
+        {/* Rejected */}
+        {message.rejected && (
+          <div className="flex items-center gap-2 rounded-xl border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] px-3 py-2 text-xs text-[rgb(var(--muted))]">
+            <XIcon size={11} />
+            {t("chat.rejected")}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -738,7 +823,6 @@ function TxConfirmCard({
   const selectedAccount = accounts.find((a) => a.id === effectiveAccountId) ?? accounts[0];
   const isForeignCurrency = !!(selectedAccount && effectiveCurrency !== selectedAccount.currency);
 
-  // Fetch account-currency equivalent for cross-currency transactions
   useEffect(() => {
     if (!isForeignCurrency || !selectedAccount) return;
     let cancelled = false;
@@ -778,7 +862,6 @@ function TxConfirmCard({
 
   return (
     <div className="overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
-      {/* Main row */}
       <div className="flex items-start justify-between gap-3 px-4 py-3">
         <div className="min-w-0 flex-1">
           <div className={["text-lg font-semibold tabular-nums leading-tight", amountColor].join(" ")}>
@@ -807,14 +890,13 @@ function TxConfirmCard({
           <button
             onClick={() => setIsEditing((v) => !v)}
             className="flex h-7 w-7 items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
-            title={locale === "ru" ? "Редактировать" : "Edit"}
+            title={t("common.edit")}
           >
             <PencilSimpleIcon size={13} weight="bold" />
           </button>
         </div>
       </div>
 
-      {/* Meta row */}
       <div className="flex flex-wrap items-center gap-3 border-t border-[rgb(var(--border-soft))] px-4 py-2 text-[11px] text-[rgb(var(--muted))]">
         {effectiveDate && <span>{formatDate(effectiveDate, locale)}</span>}
         {selectedAccount && (
@@ -830,7 +912,6 @@ function TxConfirmCard({
         <span>{Math.round(tx.confidence * 100)}% {t("chat.confidence")}</span>
       </div>
 
-      {/* Edit panel */}
       {isEditing && (
         <div className="border-t border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] p-4 space-y-3">
           <div className="grid grid-cols-2 gap-3">
@@ -844,17 +925,17 @@ function TxConfirmCard({
                 step="any"
                 value={override?.amount ?? tx.amount}
                 onChange={(e) => onUpdateOverride({ amount: parseFloat(e.target.value) || tx.amount })}
-                className="h-8 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2.5 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+                className="h-9 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2.5 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
               />
             </div>
             <div>
               <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[rgb(var(--muted))]">
-                {locale === "ru" ? "Валюта" : "Currency"}
+                {t("chat.currency")}
               </label>
               <select
                 value={override?.currency ?? tx.currency}
                 onChange={(e) => onUpdateOverride({ currency: e.target.value })}
-                className="h-8 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+                className="h-9 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
               >
                 {COMMON_CURRENCIES.map((c) => (
                   <option key={c} value={c}>{c}</option>
@@ -875,7 +956,7 @@ function TxConfirmCard({
                 type="date"
                 value={(override?.date ?? tx.date).slice(0, 10)}
                 onChange={(e) => onUpdateOverride({ date: e.target.value })}
-                className="h-8 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2.5 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+                className="h-9 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2.5 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
               />
             </div>
             {accounts.length > 0 && (
@@ -885,7 +966,7 @@ function TxConfirmCard({
                 onChange={(id) => onUpdateOverride({ accountId: id })}
                 label={tx.type === "TRANSFER"
                   ? (locale === "ru" ? "Счёт (откуда)" : "From account")
-                  : (locale === "ru" ? "Счёт" : "Account")}
+                  : t("transactions.account")}
               />
             )}
           </div>
@@ -1064,10 +1145,11 @@ function CategoriesConfirmCard({ op, t }: { op: CreateCategoriesOp; t: (key: str
 }
 
 function BudgetConfirmCard({ op, t, locale }: { op: SetBudgetOp; t: (key: string) => string; locale: string }) {
-  const periodLabel: Record<string, string> =
-    locale === "ru"
-      ? { MONTHLY: "ежемесячно", QUARTERLY: "ежеквартально", YEARLY: "ежегодно" }
-      : { MONTHLY: "monthly", QUARTERLY: "quarterly", YEARLY: "yearly" };
+  const periodLabel: Record<string, string> = {
+    MONTHLY: t("budget.monthly"),
+    QUARTERLY: t("budget.quarterly"),
+    YEARLY: t("budget.yearly"),
+  };
 
   return (
     <div className="overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
