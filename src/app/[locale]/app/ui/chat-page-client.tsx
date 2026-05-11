@@ -1,25 +1,27 @@
 "use client";
 
 import { apiFetch, getAuthToken } from "@/shared/api/client";
-import { useI18n } from "@/shared/i18n/i18n-provider";
-import { useLuca } from "@/shared/providers/luca-provider";
-import { AccountPicker } from "@/shared/ui/account-picker";
 import type {
   AiOperation,
   CreateAccountOp,
   CreateCategoriesOp,
   CreateGoalOp,
   CreateTransactionsOp,
-  SetBudgetOp,
   ParsedTransaction,
+  SetBudgetOp,
 } from "@/shared/api/types";
+import { useI18n } from "@/shared/i18n/i18n-provider";
+import { useLuca } from "@/shared/providers/luca-provider";
+import { AccountPicker } from "@/shared/ui/account-picker";
 import {
   ArrowUpIcon,
   BankIcon,
   CheckIcon,
   FolderIcon,
+  MicrophoneIcon,
   PencilSimpleIcon,
   SlidersIcon,
+  StopCircleIcon,
   TargetIcon,
   XIcon,
 } from "@phosphor-icons/react/dist/ssr";
@@ -84,16 +86,36 @@ export function ChatPageClient() {
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
 
   const sessionWasCreatedByUs = useRef(new Set<string>());
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recognitionRef = useRef<{ stop: () => void } | null>(null);
+  const voiceBaseRef = useRef("");
 
   const hasUserMessages = messages.some((m) => m.role === "user");
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isSending]);
+
+  useEffect(() => {
+    const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
+    if (isMobile) return;
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key.length !== 1) return; // skip Enter, Escape, F-keys, etc.
+      const active = document.activeElement;
+      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
+      textareaRef.current?.focus();
+    }
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   // When sessionId disappears (user starts new chat), reset to intro — React derived-state pattern
   const [trackedSessionId, setTrackedSessionId] = useState(sessionId);
@@ -150,6 +172,11 @@ export function ChatPageClient() {
   }
 
   async function sendMessage(text?: string) {
+    if (isRecording) {
+      recognitionRef.current?.stop();
+      setIsRecording(false);
+    }
+
     const msg = (text ?? input).trim();
     if (!msg || !workspace) return;
 
@@ -308,6 +335,79 @@ export function ChatPageClient() {
     }
   }
 
+  function toggleRecording() {
+    if (isRecording) {
+      recognitionRef.current?.stop();
+      return;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const w = window as any;
+    const SR: (new () => {
+      continuous: boolean;
+      interimResults: boolean;
+      lang: string;
+      start(): void;
+      stop(): void;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      onresult: ((e: any) => void) | null;
+      onend: (() => void) | null;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      onerror: ((e: any) => void) | null;
+    }) | undefined = w.SpeechRecognition ?? w.webkitSpeechRecognition;
+
+    if (!SR) return;
+
+    // On mobile, Android's Web Speech API fires each word as a new entry in
+    // event.results rather than updating in place, so interim results cause
+    // duplicate accumulation. Disable them on mobile — final-only is reliable.
+    const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
+
+    // Blur to prevent Android IME from interfering with programmatic setInput
+    if (isMobile) textareaRef.current?.blur();
+
+    voiceBaseRef.current = input;
+
+    const recognition = new SR();
+    recognition.lang = locale === "ru" ? "ru-RU" : "en-US";
+    recognition.interimResults = !isMobile;
+    recognition.continuous = !isMobile;
+
+    recognition.onresult = (event: { results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => {
+      let finalText = "";
+      let interim = "";
+      for (let i = 0; i < event.results.length; i++) {
+        const t = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalText += (finalText ? " " : "") + t;
+        } else {
+          interim += t;
+        }
+      }
+      const spoken = finalText + (interim ? (finalText ? " " : "") + interim : "");
+      const base = voiceBaseRef.current;
+      setInput(base ? (spoken ? `${base} ${spoken}` : base) : spoken);
+      requestAnimationFrame(() => {
+        if (textareaRef.current) growTextarea(textareaRef.current);
+      });
+    };
+
+    recognition.onend = () => {
+      setIsRecording(false);
+      recognitionRef.current = null;
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    };
+
+    recognition.onerror = (event: { error: string }) => {
+      if (event.error !== "aborted") console.error("[voice] error:", event.error);
+      setIsRecording(false);
+    };
+
+    recognition.start();
+    recognitionRef.current = recognition;
+    setIsRecording(true);
+  }
+
   async function rejectAction(actionId: string) {
     setMessages((prev) =>
       prev.map((m) =>
@@ -369,9 +469,16 @@ export function ChatPageClient() {
         </div>
       )}
 
-      <div className="shrink-0 bg-[rgb(var(--background))]">
-        <div className="mx-auto max-w-2xl px-4 pb-5 pt-2 lg:px-6">
-          <div className="rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-4 pb-3 pt-3.5 shadow-sm transition-colors focus-within:border-[rgb(var(--accent))]">
+      <div className="shrink-0 bg-[rgb(var(--background))] pb-[env(safe-area-inset-bottom)]">
+        <div className="mx-auto max-w-2xl px-3 pb-4 pt-2 sm:px-4 sm:pb-5 lg:px-6">
+          <div
+            className={[
+              "flex items-end gap-2 rounded-2xl border bg-[rgb(var(--surface))] px-3 py-2.5 shadow-sm transition-colors sm:px-4 sm:py-3",
+              isRecording
+                ? "border-[rgb(var(--negative))]"
+                : "border-[rgb(var(--border))] focus-within:border-[rgb(var(--accent))]",
+            ].join(" ")}
+          >
             <textarea
               ref={textareaRef}
               value={input}
@@ -385,24 +492,41 @@ export function ChatPageClient() {
                   sendMessage();
                 }
               }}
-              placeholder={t("chat.placeholder")}
+              placeholder={
+                isRecording
+                  ? (locale === "ru" ? "Говорите..." : "Listening...")
+                  : t("chat.placeholder")
+              }
               rows={1}
-              className="block w-full resize-none bg-transparent text-sm leading-relaxed outline-none placeholder:text-[rgb(var(--muted))]"
-              style={{ minHeight: "24px", maxHeight: "180px" }}
+              className="flex-1 resize-none bg-transparent py-1 text-sm leading-relaxed outline-none placeholder:text-[rgb(var(--muted))]"
+              style={{ minHeight: "24px", maxHeight: "160px" }}
             />
-            <div className="mt-2.5 flex justify-end">
-              <button
-                onClick={() => sendMessage()}
-                disabled={isSending || !input.trim() || isLoading}
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-[rgb(var(--foreground))] text-[rgb(var(--background))] transition hover:opacity-80 disabled:opacity-20 active:scale-95"
-              >
-                <ArrowUpIcon size={14} weight="bold" />
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={toggleRecording}
+              disabled={isSending || isLoading}
+              title={isRecording ? t("chat.stopRecording") : t("chat.startRecording")}
+              className={[
+                "shrink-0 flex h-9 w-9 items-center justify-center rounded-full transition active:scale-95 disabled:pointer-events-none disabled:opacity-40",
+                isRecording
+                  ? "bg-[rgb(var(--negative))] text-white"
+                  : "text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]",
+              ].join(" ")}
+            >
+              {isRecording ? (
+                <StopCircleIcon size={16} weight="fill" />
+              ) : (
+                <MicrophoneIcon size={16} weight="regular" />
+              )}
+            </button>
+            <button
+              onClick={() => sendMessage()}
+              disabled={isSending || !input.trim() || isLoading}
+              className="shrink-0 flex h-9 w-9 items-center justify-center rounded-full bg-[rgb(var(--foreground))] text-[rgb(var(--background))] transition hover:opacity-80 disabled:opacity-20 active:scale-95"
+            >
+              <ArrowUpIcon size={15} weight="bold" />
+            </button>
           </div>
-          <p className="mt-2 text-center text-[11px] text-[rgb(var(--muted-soft))]">
-            {locale === "ru" ? "Shift+Enter — новая строка" : "Shift+Enter for new line"}
-          </p>
         </div>
       </div>
     </div>
@@ -616,19 +740,18 @@ function TxConfirmCard({
 
   // Fetch account-currency equivalent for cross-currency transactions
   useEffect(() => {
-    if (!isForeignCurrency || !selectedAccount) {
-      setAccountEquivalent(null);
-      return;
-    }
-    const apiFetch = (url: string) => fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}${url}`).then((r) => r.json());
-    apiFetch(`/api/exchange-rates?base=${effectiveCurrency}`)
+    if (!isForeignCurrency || !selectedAccount) return;
+    let cancelled = false;
+    fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/exchange-rates?base=${effectiveCurrency}`)
+      .then((r) => r.json())
       .then((res: { rates: Record<string, number> }) => {
+        if (cancelled) return;
         const rate = res.rates?.[selectedAccount.currency];
-        if (rate) setAccountEquivalent((effectiveAmount * rate).toFixed(2));
-        else setAccountEquivalent(null);
+        setAccountEquivalent(rate ? (effectiveAmount * rate).toFixed(2) : null);
       })
-      .catch(() => setAccountEquivalent(null));
-  }, [effectiveAmount, effectiveCurrency, effectiveAccountId, isForeignCurrency]);
+      .catch(() => { if (!cancelled) setAccountEquivalent(null); });
+    return () => { cancelled = true; };
+  }, [effectiveAmount, effectiveCurrency, effectiveAccountId, isForeignCurrency, selectedAccount]);
 
   const isExpense = tx.type === "EXPENSE";
   const isIncome = tx.type === "INCOME";

@@ -71,6 +71,8 @@ chat:
   targetAmount: "Цель"
   deadline: "Дедлайн"
   noDeadline: "Без дедлайна"
+  startRecording: "Голосовой ввод"
+  stopRecording: "Остановить запись"
 
 dashboard:
   title: "Дашборд"

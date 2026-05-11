@@ -71,6 +71,8 @@ chat:
   targetAmount: "Target"
   deadline: "Deadline"
   noDeadline: "No deadline"
+  startRecording: "Start voice input"
+  stopRecording: "Stop recording"
 
 dashboard:
   title: "Dashboard"
