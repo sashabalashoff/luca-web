@@ -604,11 +604,31 @@ function TxConfirmCard({
   locale: string;
 }) {
   const [isEditing, setIsEditing] = useState(false);
+  const [accountEquivalent, setAccountEquivalent] = useState<string | null>(null);
 
   const effectiveAmount = override?.amount ?? tx.amount;
   const effectiveCurrency = override?.currency ?? tx.currency;
   const effectiveDate = override?.date ?? tx.date;
   const effectiveAccountId = override?.accountId ?? accounts[0]?.id;
+
+  const selectedAccount = accounts.find((a) => a.id === effectiveAccountId) ?? accounts[0];
+  const isForeignCurrency = !!(selectedAccount && effectiveCurrency !== selectedAccount.currency);
+
+  // Fetch account-currency equivalent for cross-currency transactions
+  useEffect(() => {
+    if (!isForeignCurrency || !selectedAccount) {
+      setAccountEquivalent(null);
+      return;
+    }
+    const apiFetch = (url: string) => fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}${url}`).then((r) => r.json());
+    apiFetch(`/api/exchange-rates?base=${effectiveCurrency}`)
+      .then((res: { rates: Record<string, number> }) => {
+        const rate = res.rates?.[selectedAccount.currency];
+        if (rate) setAccountEquivalent((effectiveAmount * rate).toFixed(2));
+        else setAccountEquivalent(null);
+      })
+      .catch(() => setAccountEquivalent(null));
+  }, [effectiveAmount, effectiveCurrency, effectiveAccountId, isForeignCurrency]);
 
   const isExpense = tx.type === "EXPENSE";
   const isIncome = tx.type === "INCOME";
@@ -633,8 +653,6 @@ function TxConfirmCard({
 
   const sign = isExpense ? "−" : isIncome ? "+" : "";
 
-  const selectedAccount = accounts.find((a) => a.id === effectiveAccountId) ?? accounts[0];
-
   return (
     <div className="overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
       {/* Main row */}
@@ -645,6 +663,11 @@ function TxConfirmCard({
             {effectiveAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
             {effectiveCurrency}
           </div>
+          {isForeignCurrency && accountEquivalent && (
+            <div className="mt-0.5 text-xs text-[rgb(var(--muted))]">
+              ≈ {accountEquivalent} {selectedAccount?.currency}
+            </div>
+          )}
           {(tx.merchant || tx.counterparty) && (
             <div className="mt-0.5 text-sm font-medium text-[rgb(var(--foreground))]">
               {tx.merchant || tx.counterparty}

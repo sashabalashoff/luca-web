@@ -22,6 +22,12 @@ export default function SettingsPage() {
   const [savingName, setSavingName] = useState(false);
   const [nameSaved, setNameSaved] = useState(false);
 
+  /* Base currency editing */
+  const [editingCurrency, setEditingCurrency] = useState(false);
+  const [currencyInput, setCurrencyInput] = useState("");
+  const [savingCurrency, setSavingCurrency] = useState(false);
+  const [currencySaved, setCurrencySaved] = useState(false);
+
   /* New account form */
   const [showAccountForm, setShowAccountForm] = useState(false);
   const [accountForm, setAccountForm] = useState({ name: "", type: "CASH", currency: "" });
@@ -48,6 +54,26 @@ export default function SettingsPage() {
       console.error(err);
     } finally {
       setSavingName(false);
+    }
+  }
+
+  async function saveCurrency() {
+    const val = currencyInput.trim().toUpperCase();
+    if (!workspace || !val || val.length !== 3) return;
+    setSavingCurrency(true);
+    try {
+      await apiFetch(`/api/workspaces/${workspace.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ baseCurrency: val }),
+      });
+      setCurrencySaved(true);
+      setTimeout(() => setCurrencySaved(false), 2000);
+      setEditingCurrency(false);
+      await reload();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSavingCurrency(false);
     }
   }
 
@@ -129,9 +155,51 @@ export default function SettingsPage() {
           )}
         </Row>
         <Row label={t("settings.currency")}>
-          <span className="text-sm font-mono text-[rgb(var(--muted))]">
-            {workspace?.baseCurrency ?? "—"}
-          </span>
+          {editingCurrency ? (
+            <div className="flex items-center gap-2">
+              <input
+                autoFocus
+                value={currencyInput}
+                onChange={(e) => setCurrencyInput(e.target.value.toUpperCase())}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveCurrency();
+                  if (e.key === "Escape") setEditingCurrency(false);
+                }}
+                maxLength={3}
+                placeholder="USD"
+                className="w-20 rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-2.5 py-1.5 text-sm font-mono uppercase outline-none focus:border-[rgb(var(--accent))]"
+              />
+              <button
+                onClick={saveCurrency}
+                disabled={savingCurrency || currencyInput.trim().length !== 3}
+                className="flex h-7 w-7 items-center justify-center rounded-lg bg-[rgb(var(--foreground))] text-[rgb(var(--background))] disabled:opacity-40"
+              >
+                <CheckIcon size={13} weight="bold" />
+              </button>
+              <button
+                onClick={() => setEditingCurrency(false)}
+                className="flex h-7 w-7 items-center justify-center rounded-lg border border-[rgb(var(--border))] text-[rgb(var(--muted))]"
+              >
+                <span className="text-xs">✕</span>
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => {
+                setCurrencyInput(workspace?.baseCurrency ?? "");
+                setEditingCurrency(true);
+              }}
+              className="flex items-center gap-1.5 text-sm text-[rgb(var(--muted))] transition hover:text-[rgb(var(--foreground))]"
+            >
+              {currencySaved ? (
+                <span className="flex items-center gap-1 text-[rgb(var(--positive))]">
+                  <CheckIcon size={12} weight="bold" /> {t("settings.saved")}
+                </span>
+              ) : (
+                <span className="font-mono">{workspace?.baseCurrency ?? "—"}</span>
+              )}
+            </button>
+          )}
         </Row>
       </Section>
 

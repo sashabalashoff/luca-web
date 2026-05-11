@@ -122,8 +122,9 @@ export function TransactionsPageClient() {
     accountId: "",
     toAccountId: "",
   });
-  // Multi-currency: base currency equivalent (display only, auto-calculated)
-  const [baseEquivalent, setBaseEquivalent] = useState("");
+  // Multi-currency: account currency equivalent when transaction is in a different currency
+  const [crossRateAmount, setCrossRateAmount] = useState(""); // account-currency equivalent
+  const [crossRateLockedByUser, setCrossRateLockedByUser] = useState(false); // user manually edited it
   const [fetchingRate, setFetchingRate] = useState(false);
 
   function buildQuery(cursor?: string) {
@@ -199,34 +200,37 @@ export function TransactionsPageClient() {
     }
   }, [defaultAccount]);
 
-  // Multi-currency: fetch exchange rate and auto-calculate base equivalent
+  // Derived: transaction currency differs from account currency → cross-currency transaction
   const selectedAccount = accounts.find((a) => a.id === addForm.accountId);
-  const isCrossRate = !!(
+  const isForeignCurrency = !!(
     selectedAccount &&
-    workspace &&
-    selectedAccount.currency !== workspace.baseCurrency
+    addForm.currency &&
+    addForm.currency !== selectedAccount.currency
   );
 
+  // Auto-compute account-currency equivalent when foreign currency is selected
   useEffect(() => {
-    if (!isCrossRate || !addForm.amount || !workspace || !selectedAccount) {
-      setBaseEquivalent("");
+    if (!isForeignCurrency || !addForm.amount || !selectedAccount) {
+      if (!isForeignCurrency) setCrossRateAmount("");
       return;
     }
+    if (crossRateLockedByUser) return; // user manually set this value
+
     const n = parseFloat(addForm.amount);
-    if (isNaN(n) || n === 0) { setBaseEquivalent(""); return; }
+    if (isNaN(n) || n === 0) { setCrossRateAmount(""); return; }
 
     setFetchingRate(true);
     apiFetch<{ rates: Record<string, number> }>(
-      `/api/exchange-rates?base=${selectedAccount.currency}`
+      `/api/exchange-rates?base=${addForm.currency}`
     )
       .then((res) => {
-        const rate = res.rates[workspace.baseCurrency];
-        if (rate) setBaseEquivalent((n * rate).toFixed(2));
-        else setBaseEquivalent("");
+        const rate = res.rates[selectedAccount.currency];
+        if (rate) setCrossRateAmount((n * rate).toFixed(2));
+        else setCrossRateAmount("");
       })
-      .catch(() => setBaseEquivalent(""))
+      .catch(() => setCrossRateAmount(""))
       .finally(() => setFetchingRate(false));
-  }, [addForm.amount, addForm.accountId, isCrossRate]);
+  }, [addForm.amount, addForm.currency, addForm.accountId, isForeignCurrency, crossRateLockedByUser]);
 
   async function deleteTransaction(id: string) {
     setDeletingId(id);
@@ -255,6 +259,12 @@ export function TransactionsPageClient() {
 
     setSavingTx(true);
     try {
+      // If paying in foreign currency and we have an account-currency override, use it
+      const accountAmount =
+        isForeignCurrency && crossRateAmount && Number(crossRateAmount) > 0
+          ? Number(crossRateAmount)
+          : null;
+
       const tx = await apiFetch<{ transaction: Transaction }>("/api/transactions", {
         method: "POST",
         body: JSON.stringify({
@@ -264,6 +274,7 @@ export function TransactionsPageClient() {
           type: addForm.type,
           amount: Number(addForm.amount),
           currency,
+          accountAmount,
           date: addForm.date,
           categoryId: addForm.categoryId || null,
           merchant: addForm.merchant || null,
@@ -283,7 +294,8 @@ export function TransactionsPageClient() {
         accountId: defaultAccount?.id ?? "",
         toAccountId: "",
       });
-      setBaseEquivalent("");
+      setCrossRateAmount("");
+      setCrossRateLockedByUser(false);
       setTransactions((prev) => [tx.transaction, ...prev]);
       reloadContext();
     } catch (err) {
@@ -377,6 +389,8 @@ export function TransactionsPageClient() {
               onChange={(id) => {
                 const acc = accounts.find((a) => a.id === id);
                 setAddForm((f) => ({ ...f, accountId: id, currency: acc?.currency ?? f.currency }));
+                setCrossRateLockedByUser(false);
+                setCrossRateAmount("");
               }}
               label={addForm.type === "TRANSFER" ? "From account" : "Account"}
             />
@@ -396,29 +410,68 @@ export function TransactionsPageClient() {
           <div>
             <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
               {t("transactions.amount")}
-              {selectedAccount && (
-                <span className="ml-1 font-normal text-[rgb(var(--muted-soft))]">
-                  ({selectedAccount.currency})
-                </span>
-              )}
             </label>
-            <AmountInput
-              value={addForm.amount}
-              onChange={(v) => setAddForm((f) => ({ ...f, amount: v }))}
-              currency={selectedAccount?.currency ?? addForm.currency}
-              placeholder="0.00"
-            />
-            {/* Cross-rate equivalent */}
-            {isCrossRate && addForm.amount && (
-              <div className="mt-1.5 flex items-center gap-1.5 text-xs text-[rgb(var(--muted))]">
-                <ArrowRightIcon size={11} />
-                {fetchingRate ? (
-                  <span>Calculating...</span>
-                ) : baseEquivalent ? (
-                  <span>
-                    ≈ <span className="font-semibold text-[rgb(var(--foreground))]">{baseEquivalent} {workspace?.baseCurrency}</span>
-                  </span>
-                ) : null}
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <AmountInput
+                  value={addForm.amount}
+                  onChange={(v) => {
+                    setAddForm((f) => ({ ...f, amount: v }));
+                    setCrossRateLockedByUser(false);
+                  }}
+                  currency={addForm.currency || selectedAccount?.currency || ""}
+                  placeholder="0.00"
+                />
+              </div>
+              {/* Currency selector */}
+              <select
+                value={addForm.currency}
+                onChange={(e) => {
+                  setAddForm((f) => ({ ...f, currency: e.target.value }));
+                  setCrossRateLockedByUser(false);
+                  setCrossRateAmount("");
+                }}
+                className="h-10 rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-2 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+              >
+                {selectedAccount && (
+                  <option value={selectedAccount.currency}>{selectedAccount.currency}</option>
+                )}
+                {COMMON_CURRENCIES.filter((c) => c !== selectedAccount?.currency).map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+            {/* Account-currency equivalent when paying in foreign currency */}
+            {isForeignCurrency && (
+              <div className="mt-2 flex items-center gap-2">
+                <ArrowRightIcon size={11} className="shrink-0 text-[rgb(var(--muted-soft))]" />
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={crossRateAmount}
+                  onChange={(e) => {
+                    setCrossRateAmount(e.target.value);
+                    setCrossRateLockedByUser(true);
+                  }}
+                  placeholder="0.00"
+                  className="h-8 w-32 rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-2.5 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+                />
+                <span className="text-xs font-medium text-[rgb(var(--muted))]">
+                  {selectedAccount?.currency}
+                </span>
+                {fetchingRate && (
+                  <span className="text-[11px] text-[rgb(var(--muted-soft))]">…</span>
+                )}
+                {crossRateLockedByUser && (
+                  <button
+                    type="button"
+                    onClick={() => { setCrossRateLockedByUser(false); setCrossRateAmount(""); }}
+                    className="text-[10px] text-[rgb(var(--accent))] hover:underline"
+                  >
+                    auto
+                  </button>
+                )}
               </div>
             )}
           </div>
