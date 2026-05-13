@@ -48,6 +48,11 @@ type ChatAction = {
   overrides?: TransactionOverride[];
 };
 
+type ThinkingStep = {
+  tool: string;
+  phase: "pending" | "done";
+};
+
 type Message = {
   id: string;
   role: "user" | "assistant";
@@ -58,6 +63,7 @@ type Message = {
   rejected?: boolean;
   streaming?: boolean;
   savedOperations?: AiOperation[];
+  thinkingSteps?: ThinkingStep[];
 };
 
 const INTRO_ID = "intro";
@@ -251,7 +257,26 @@ export function ChatPageClient() {
             continue;
           }
 
-          if (eventType === "text") {
+          if (eventType === "thinking") {
+            const tool = payload.tool as string;
+            const phase = payload.phase as "tool_start" | "tool_done";
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== assistantMsgId) return m;
+                const steps = m.thinkingSteps ?? [];
+                if (phase === "tool_start") {
+                  return { ...m, thinkingSteps: [...steps, { tool, phase: "pending" }] };
+                } else {
+                  return {
+                    ...m,
+                    thinkingSteps: steps.map((s) =>
+                      s.tool === tool && s.phase === "pending" ? { ...s, phase: "done" } : s
+                    ),
+                  };
+                }
+              })
+            );
+          } else if (eventType === "text") {
             const delta = payload.delta as string;
             setMessages((prev) =>
               prev.map((m) =>
@@ -671,7 +696,7 @@ function buildInitialOverrides(
   return overrides;
 }
 
-// ─── Thinking indicator ───────────────────────────────────────────────────────
+// ─── Thinking indicator (generic dots) ───────────────────────────────────────
 
 function ThinkingIndicator({ label }: { label?: string }) {
   return (
@@ -686,6 +711,96 @@ function ThinkingIndicator({ label }: { label?: string }) {
         ))}
       </div>
       {label && <span className="text-xs">{label}</span>}
+    </div>
+  );
+}
+
+// ─── Thinking process (tool steps) ───────────────────────────────────────────
+
+function ThinkingProcess({
+  steps,
+  t,
+  collapsed = false,
+}: {
+  steps: ThinkingStep[];
+  t: (key: string) => string;
+  collapsed?: boolean;
+}) {
+  if (collapsed) {
+    // Compact chips row shown above the answer
+    return (
+      <div className="flex flex-wrap gap-1.5 pb-1">
+        {steps.map((step, i) => (
+          <span
+            key={i}
+            className="inline-flex items-center gap-1 rounded-full border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-2.5 py-0.5 text-[11px] text-[rgb(var(--muted))]"
+          >
+            <CheckIcon size={9} weight="bold" className="text-[rgb(var(--positive))]" />
+            {t(`chat.tools.${step.tool}`) !== `chat.tools.${step.tool}`
+              ? t(`chat.tools.${step.tool}`)
+              : step.tool.replace(/_/g, " ")}
+          </span>
+        ))}
+      </div>
+    );
+  }
+
+  // Full animated list while waiting for the answer
+  return (
+    <div className="space-y-2 py-1">
+      {steps.map((step, i) => {
+        const label =
+          t(`chat.tools.${step.tool}`) !== `chat.tools.${step.tool}`
+            ? t(`chat.tools.${step.tool}`)
+            : step.tool.replace(/_/g, " ");
+        const isDone = step.phase === "done";
+        const isLast = i === steps.length - 1;
+
+        return (
+          <div key={i} className="flex items-center gap-2.5">
+            {/* Icon */}
+            <div className="relative flex h-5 w-5 shrink-0 items-center justify-center">
+              {isDone ? (
+                <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[rgb(var(--positive))]/15">
+                  <CheckIcon size={9} weight="bold" className="text-[rgb(var(--positive))]" />
+                </span>
+              ) : (
+                <span className="flex h-4 w-4 items-center justify-center">
+                  {/* Spinning ring for active step */}
+                  <span className="block h-3.5 w-3.5 animate-spin rounded-full border-2 border-[rgb(var(--border))] border-t-[rgb(var(--accent))]" />
+                </span>
+              )}
+              {/* Vertical connector line */}
+              {!isLast && (
+                <span className="absolute left-1/2 top-5 h-2 w-px -translate-x-1/2 bg-[rgb(var(--border))]" />
+              )}
+            </div>
+
+            {/* Label */}
+            <span
+              className={[
+                "text-xs transition-colors",
+                isDone
+                  ? "text-[rgb(var(--muted))] line-through"
+                  : "font-medium text-[rgb(var(--foreground))]",
+              ].join(" ")}
+            >
+              {label}
+              {!isDone && (
+                <span className="ml-1 inline-flex gap-0.5">
+                  {[0, 1, 2].map((j) => (
+                    <span
+                      key={j}
+                      className="inline-block h-0.5 w-0.5 animate-bounce rounded-full bg-[rgb(var(--accent))]"
+                      style={{ animationDelay: `${j * 150}ms` }}
+                    />
+                  ))}
+                </span>
+              )}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -719,12 +834,23 @@ function MessageRow({
     );
   }
 
-  // Assistant message
-  if (message.streaming && !message.content && !message.action) {
+  // Assistant message — still waiting (no text and no tool steps yet)
+  if (message.streaming && !message.content && !message.action && !message.thinkingSteps?.length) {
     return (
       <div className="flex items-start gap-3">
         <div className="flex min-h-[36px] items-center">
           <ThinkingIndicator label={t("chat.thinking")} />
+        </div>
+      </div>
+    );
+  }
+
+  // Tool steps phase — show process list
+  if (message.streaming && !message.content && !message.action && message.thinkingSteps?.length) {
+    return (
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <ThinkingProcess steps={message.thinkingSteps} t={t} />
         </div>
       </div>
     );
@@ -735,6 +861,14 @@ function MessageRow({
   return (
     <div className="flex items-start gap-3">
       <div className="min-w-0 flex-1 space-y-3">
+        {message.thinkingSteps && message.thinkingSteps.length > 0 && (
+          <ThinkingProcess
+            steps={message.thinkingSteps}
+            t={t}
+            collapsed={!!message.content || !!message.action}
+          />
+        )}
+
         {message.content && (
           <p className="whitespace-pre-wrap text-sm leading-relaxed text-[rgb(var(--foreground))]">
             {message.content}
