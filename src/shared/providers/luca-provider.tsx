@@ -48,8 +48,10 @@ type LucaContextValue = {
   defaultAccount: LucaAccount | null;
   isLoading: boolean;
   transactionKey: number;
+  isNewUser: boolean;
   setWorkspaceId: (id: string) => void;
   reload: () => Promise<void>;
+  confirmOnboarding: (currency: string) => Promise<void>;
 };
 
 const LucaContext = createContext<LucaContextValue | null>(null);
@@ -60,6 +62,7 @@ export function LucaProvider({ children }: { children: React.ReactNode }) {
   const [accounts, setAccounts] = useState<LucaAccount[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [transactionKey, setTransactionKey] = useState(0);
+  const [isNewUser, setIsNewUser] = useState(false);
 
   const workspace =
     workspaces.find((w) => w.id === currentWorkspaceId) ?? workspaces[0] ?? null;
@@ -77,10 +80,16 @@ export function LucaProvider({ children }: { children: React.ReactNode }) {
   async function load() {
     setIsLoading(true);
     try {
-      await apiFetch<{ workspace: LucaWorkspace }>("/api/bootstrap", {
-        method: "POST",
-        body: JSON.stringify({ name: "Personal", type: "PERSONAL", baseCurrency: detectLocaleCurrency() }),
-      });
+      const bootstrapResult = await apiFetch<{ workspace: LucaWorkspace; alreadyExists: boolean }>(
+        "/api/bootstrap",
+        {
+          method: "POST",
+          body: JSON.stringify({ name: "Personal", type: "PERSONAL", baseCurrency: detectLocaleCurrency() }),
+        }
+      );
+      if (!bootstrapResult.alreadyExists) {
+        setIsNewUser(true);
+      }
 
       const wsResult = await apiFetch<{ workspaces: LucaWorkspace[] }>("/api/workspaces");
       setWorkspaces(wsResult.workspaces);
@@ -114,6 +123,19 @@ export function LucaProvider({ children }: { children: React.ReactNode }) {
     load();
   }, []);
 
+  async function confirmOnboarding(currency: string) {
+    const ws = workspaces[0];
+    if (!ws) return;
+    await apiFetch(`/api/workspaces/${ws.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ baseCurrency: currency }),
+    });
+    setWorkspaces((prev) =>
+      prev.map((w) => (w.id === ws.id ? { ...w, baseCurrency: currency } : w))
+    );
+    setIsNewUser(false);
+  }
+
   return (
     <LucaContext.Provider
       value={{
@@ -123,8 +145,10 @@ export function LucaProvider({ children }: { children: React.ReactNode }) {
         defaultAccount: accounts[0] ?? null,
         isLoading,
         transactionKey,
+        isNewUser,
         setWorkspaceId,
         reload: load,
+        confirmOnboarding,
       }}
     >
       {children}

@@ -242,3 +242,11 @@ budget:
   left: "left"
   over: "over"
   currency: "Currency"
+
+onboarding:
+  title: "Welcome to LUCA"
+  subtitle: "Set your base currency — all reports and balances will use it."
+  autoDetected: "Auto-detected based on your locale"
+  changeCurrency: "Change currency"
+  confirm: "Looks good, let's go"
+  search: "Search currency..."

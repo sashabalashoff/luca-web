@@ -18,6 +18,7 @@ import { useTheme } from "next-themes";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
+import { OnboardingCurrencyDialog } from "./onboarding-currency-dialog";
 
 // Settings removed from nav — accessible via footer three-dot menu
 const nav = [
@@ -597,6 +598,7 @@ export function AppShell({
 
   return (
     <LucaProvider>
+      <OnboardingCurrencyDialog />
       <div className="luca-app">
         <Sidebar locale={locale} collapsed={collapsed} onToggle={toggleCollapsed} />
         <MobileSidebar
