@@ -54,6 +54,7 @@ type Message = {
   content: string;
   action?: ChatAction | null;
   confirmed?: boolean;
+  confirmedActionId?: string;
   rejected?: boolean;
   streaming?: boolean;
   savedOperations?: AiOperation[];
@@ -315,10 +316,30 @@ export function ChatPageClient() {
     const hasTx = operations.some((op) => op.type === "CREATE_TRANSACTIONS");
     if (hasTx && !defaultAccount) return;
 
+    // Merge overrides into savedOperations so TxSavedCard shows the confirmed values
+    let overrideIdx = 0;
+    const savedOperations: AiOperation[] = operations.map((op) => {
+      if (op.type !== "CREATE_TRANSACTIONS") return op;
+      return {
+        ...op,
+        transactions: (op as CreateTransactionsOp).transactions.map((tx) => {
+          const ov = overrides[overrideIdx++];
+          if (!ov) return tx;
+          return {
+            ...tx,
+            ...(ov.amount !== undefined && { amount: ov.amount }),
+            ...(ov.currency !== undefined && { currency: ov.currency }),
+            ...(ov.merchant !== undefined && { merchant: ov.merchant }),
+            ...(ov.date !== undefined && { date: ov.date }),
+          };
+        }),
+      };
+    });
+
     setMessages((prev) =>
       prev.map((m) =>
         m.action?.id === actionId
-          ? { ...m, confirmed: true, action: null, savedOperations: operations }
+          ? { ...m, confirmed: true, confirmedActionId: actionId, action: null, savedOperations }
           : m
       )
     );
@@ -334,10 +355,11 @@ export function ChatPageClient() {
       reload();
     } catch (err) {
       console.error(err);
+      // Rollback by stable actionId rather than by reference equality
       setMessages((prev) =>
         prev.map((m) =>
-          m.confirmed && m.savedOperations === operations
-            ? { ...m, confirmed: false, action, savedOperations: undefined }
+          m.confirmedActionId === actionId
+            ? { ...m, confirmed: false, confirmedActionId: undefined, action, savedOperations: undefined }
             : m
         )
       );

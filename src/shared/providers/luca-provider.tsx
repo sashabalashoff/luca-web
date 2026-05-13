@@ -22,6 +22,25 @@ export type LucaAccount = {
 
 const WORKSPACE_KEY = "luca-workspace-id";
 
+const REGION_CURRENCY: Record<string, string> = {
+  RU: "RUB", UA: "UAH", BY: "BYN", KZ: "KZT", GE: "GEL",
+  GB: "GBP", EU: "EUR", DE: "EUR", FR: "EUR", IT: "EUR", ES: "EUR",
+  PL: "PLN", CZ: "CZK", HU: "HUF", RO: "RON", TR: "TRY",
+  AE: "AED", SA: "SAR", CN: "CNY", JP: "JPY", IN: "INR",
+  BR: "BRL", MX: "MXN", AU: "AUD", CA: "CAD", CH: "CHF",
+  SE: "SEK", NO: "NOK", DK: "DKK", SG: "SGD", HK: "HKD",
+};
+
+function detectLocaleCurrency(): string {
+  try {
+    const locale = new Intl.Locale(navigator.language);
+    const region = (locale as Intl.Locale & { region?: string }).region;
+    return (region && REGION_CURRENCY[region]) ?? "USD";
+  } catch {
+    return "USD";
+  }
+}
+
 type LucaContextValue = {
   workspaces: LucaWorkspace[];
   workspace: LucaWorkspace | null;
@@ -60,7 +79,7 @@ export function LucaProvider({ children }: { children: React.ReactNode }) {
     try {
       await apiFetch<{ workspace: LucaWorkspace }>("/api/bootstrap", {
         method: "POST",
-        body: JSON.stringify({ name: "Personal", type: "PERSONAL", baseCurrency: "USD" }),
+        body: JSON.stringify({ name: "Personal", type: "PERSONAL", baseCurrency: detectLocaleCurrency() }),
       });
 
       const wsResult = await apiFetch<{ workspaces: LucaWorkspace[] }>("/api/workspaces");

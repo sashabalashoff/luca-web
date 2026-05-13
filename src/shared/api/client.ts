@@ -32,7 +32,14 @@ export async function apiFetch<T>(
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text);
+    let message = text;
+    try {
+      const json = JSON.parse(text) as { error?: { message?: string } };
+      if (json.error?.message) message = json.error.message;
+    } catch {
+      // not JSON — use raw text
+    }
+    throw new Error(message);
   }
 
   const json = await response.json();
