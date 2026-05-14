@@ -2,21 +2,21 @@
 
 /* ─── Design tokens ─────────────────────────────────────── */
 :root {
-  --background:     248 248 252;
+  --background:     246 247 249;
   --surface:        255 255 255;
-  --surface-soft:   242 242 248;
+  --surface-soft:   240 243 246;
   --surface-raised: 255 255 255;
 
-  --border:         218 218 230;
-  --border-soft:    234 234 244;
+  --border:         218 224 230;
+  --border-soft:    232 237 242;
 
-  --foreground:     11 11 17;
-  --muted:          108 108 124;
-  --muted-soft:     158 158 175;
+  --foreground:     18 23 31;
+  --muted:          98 111 128;
+  --muted-soft:     145 157 172;
 
-  --accent:         99 102 241;
-  --accent-dim:     99 102 241 / 0.09;
-  --accent-hover:   79 82 221;
+  --accent:         8 126 164;
+  --accent-dim:     8 126 164 / 0.10;
+  --accent-hover:   5 105 138;
 
   --positive:       22 163 74;
   --positive-dim:   22 163 74 / 0.09;
@@ -36,21 +36,21 @@
 }
 
 .dark {
-  --background:   9 9 15;
-  --surface:      15 15 22;
-  --surface-soft: 21 21 30;
-  --surface-raised: 26 26 36;
+  --background:   12 14 18;
+  --surface:      18 21 27;
+  --surface-soft: 24 29 36;
+  --surface-raised: 22 26 33;
 
   --border:       255 255 255 / 0.08;
   --border-soft:  255 255 255 / 0.04;
 
-  --foreground:   246 246 255;
-  --muted:        150 150 170;
-  --muted-soft:   110 110 130;
+  --foreground:   244 247 250;
+  --muted:        154 166 181;
+  --muted-soft:   107 119 134;
 
-  --accent:       130 138 249;
-  --accent-dim:   99 102 241 / 0.14;
-  --accent-hover: 152 158 255;
+  --accent:       45 167 205;
+  --accent-dim:   45 167 205 / 0.14;
+  --accent-hover: 80 190 225;
 
   --positive:     34 197 94;
   --positive-dim: 34 197 94 / 0.1;
@@ -100,7 +100,57 @@ button, input, textarea, select {
   display: flex;
   height: 100dvh;
   overflow: hidden;
-  background: rgb(var(--background));
+  background:
+    linear-gradient(180deg, rgb(var(--surface-soft) / 0.48), transparent 220px),
+    rgb(var(--background));
+}
+
+.luca-page {
+  width: 100%;
+  max-width: 1120px;
+}
+
+.luca-page-wide {
+  width: 100%;
+  max-width: 1280px;
+}
+
+.luca-panel {
+  overflow: hidden;
+  border: 1px solid rgb(var(--border));
+  border-radius: 8px;
+  background: rgb(var(--surface));
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+}
+
+.dark .luca-panel {
+  box-shadow: none;
+}
+
+.luca-control {
+  border: 1px solid rgb(var(--border));
+  border-radius: 8px;
+  background: rgb(var(--surface));
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.luca-control:hover {
+  background: rgb(var(--surface-soft));
+}
+
+.luca-primary {
+  border-radius: 8px;
+  background: rgb(var(--foreground));
+  color: rgb(var(--background));
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.luca-primary:hover {
+  opacity: 0.86;
+}
+
+.luca-primary:active {
+  transform: scale(0.98);
 }
 
 /* ─── Landing gradient ──────────────────────────────────── */

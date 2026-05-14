@@ -29,6 +29,8 @@ export function GoalsPageClient() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [contributions, setContributions] = useState<Record<string, string>>({});
+  const [savingContributionId, setSavingContributionId] = useState<string | null>(null);
   const [form, setForm] = useState({ name: "", targetAmount: "", deadline: "" });
 
   function loadGoals() {
@@ -90,11 +92,34 @@ export function GoalsPageClient() {
     }
   }
 
+  async function addContribution(goal: Goal) {
+    const amount = Number(contributions[goal.id]);
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    setSavingContributionId(goal.id);
+    try {
+      const nextAmount = Number(goal.currentAmount) + amount;
+      const status = nextAmount >= Number(goal.targetAmount) ? "COMPLETED" : goal.status;
+      const updated = await apiFetch<{ goal: Goal }>(`/api/goals/${goal.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ currentAmount: nextAmount, status })
+      });
+      setGoals((prev) => prev.map((g) => (g.id === goal.id ? updated.goal : g)));
+      setContributions((prev) => ({ ...prev, [goal.id]: "" }));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSavingContributionId(null);
+    }
+  }
+
   const active = goals.filter((g) => g.status === "ACTIVE");
   const completed = goals.filter((g) => g.status === "COMPLETED");
+  const totalTarget = active.reduce((sum, goal) => sum + Number(goal.targetAmount), 0);
+  const totalSaved = active.reduce((sum, goal) => sum + Number(goal.currentAmount), 0);
+  const totalPct = totalTarget > 0 ? Math.round((totalSaved / totalTarget) * 100) : 0;
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="luca-page space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">{t("goals.title")}</h1>
@@ -107,6 +132,28 @@ export function GoalsPageClient() {
           <PlusIcon size={14} weight="bold" />
           {t("goals.add")}
         </button>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        <div className="luca-panel p-4">
+          <div className="text-xs font-medium text-[rgb(var(--muted))]">{t("goals.active")}</div>
+          <div className="mt-1 text-2xl font-semibold tabular-nums">{active.length}</div>
+        </div>
+        <div className="luca-panel p-4">
+          <div className="text-xs font-medium text-[rgb(var(--muted))]">{t("goals.saved")}</div>
+          <div className="mt-1 text-2xl font-semibold tabular-nums">
+            {workspace?.baseCurrency ?? ""} {totalSaved.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+          </div>
+        </div>
+        <div className="luca-panel p-4">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div className="text-xs font-medium text-[rgb(var(--muted))]">{t("goals.progress")}</div>
+            <div className="text-xs font-semibold tabular-nums text-[rgb(var(--accent))]">{totalPct}%</div>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-[rgb(var(--surface-soft))]">
+            <div className="h-full rounded-full bg-[rgb(var(--accent))]" style={{ width: `${Math.min(100, totalPct)}%` }} />
+          </div>
+        </div>
       </div>
 
       {showForm && (
@@ -198,6 +245,12 @@ export function GoalsPageClient() {
                   onDelete={() => deleteGoal(goal.id)}
                   savedLabel={t("goals.saved")}
                   targetLabel={t("goals.target")}
+                  contributionValue={contributions[goal.id] ?? ""}
+                  savingContribution={savingContributionId === goal.id}
+                  onContributionChange={(value) => setContributions((prev) => ({ ...prev, [goal.id]: value }))}
+                  onAddContribution={() => addContribution(goal)}
+                  addContributionLabel={t("goals.addContribution")}
+                  contributionPlaceholder={t("goals.contributionPlaceholder")}
                 />
               ))}
             </div>
@@ -217,6 +270,12 @@ export function GoalsPageClient() {
                     onDelete={() => deleteGoal(goal.id)}
                     savedLabel={t("goals.saved")}
                     targetLabel={t("goals.target")}
+                    contributionValue={contributions[goal.id] ?? ""}
+                    savingContribution={savingContributionId === goal.id}
+                    onContributionChange={(value) => setContributions((prev) => ({ ...prev, [goal.id]: value }))}
+                    onAddContribution={() => addContribution(goal)}
+                    addContributionLabel={t("goals.addContribution")}
+                    contributionPlaceholder={t("goals.contributionPlaceholder")}
                   />
                 ))}
               </div>
@@ -233,13 +292,25 @@ function GoalCard({
   onToggle,
   onDelete,
   savedLabel,
-  targetLabel
+  targetLabel,
+  contributionValue,
+  savingContribution,
+  onContributionChange,
+  onAddContribution,
+  addContributionLabel,
+  contributionPlaceholder
 }: {
   goal: Goal;
   onToggle: () => void;
   onDelete: () => void;
   savedLabel: string;
   targetLabel: string;
+  contributionValue: string;
+  savingContribution: boolean;
+  onContributionChange: (value: string) => void;
+  onAddContribution: () => void;
+  addContributionLabel: string;
+  contributionPlaceholder: string;
 }) {
   const target = Number(goal.targetAmount);
   const current = Number(goal.currentAmount);
@@ -315,6 +386,28 @@ function GoalCard({
             month: "short",
             day: "numeric"
           })}
+        </div>
+      )}
+
+      {!isComplete && (
+        <div className="mt-4 flex flex-col gap-2 border-t border-[rgb(var(--border-soft))] pt-3 sm:flex-row">
+          <input
+            type="number"
+            min="0"
+            step="any"
+            value={contributionValue}
+            onChange={(e) => onContributionChange(e.target.value)}
+            placeholder={contributionPlaceholder}
+            className="h-9 min-w-0 flex-1 rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+          />
+          <button
+            onClick={onAddContribution}
+            disabled={savingContribution || !Number(contributionValue)}
+            className="flex h-9 items-center justify-center gap-1.5 rounded-lg bg-[rgb(var(--foreground))] px-3 text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85 disabled:opacity-40"
+          >
+            <PlusIcon size={13} weight="bold" />
+            {savingContribution ? "..." : addContributionLabel}
+          </button>
         </div>
       )}
     </div>

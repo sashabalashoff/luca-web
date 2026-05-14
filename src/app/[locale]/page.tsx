@@ -24,15 +24,15 @@ export default async function LandingPage({
 
   const features = isRu
     ? [
-        { icon: ChatCircleTextIcon, title: "Чат-first", desc: "Просто скажи, что потратил — LUCA запишет и сохранит" },
-        { icon: ShieldCheckIcon,    title: "Без банков",    desc: "Работает без привязки счетов и открытых API" },
-        { icon: BuildingsIcon,      title: "Личное и бизнес", desc: "Один инструмент для разных денежных потоков" }
-      ]
+      { icon: ChatCircleTextIcon, title: "Чат-first", desc: "Просто скажи, что потратил — LUCA запишет и сохранит" },
+      { icon: ShieldCheckIcon, title: "Без банков", desc: "Работает без привязки счетов и открытых API" },
+      { icon: BuildingsIcon, title: "Личное и бизнес", desc: "Один инструмент для разных денежных потоков" }
+    ]
     : [
-        { icon: ChatCircleTextIcon, title: "Chat-first",        desc: "Just tell LUCA what happened — it records and saves it" },
-        { icon: ShieldCheckIcon,    title: "No bank login",     desc: "Works without account integrations or open APIs" },
-        { icon: BuildingsIcon,      title: "Personal + business", desc: "One core for every money flow you have" }
-      ];
+      { icon: ChatCircleTextIcon, title: "Chat-first", desc: "Just tell LUCA what happened — it records and saves it" },
+      { icon: ShieldCheckIcon, title: "No bank login", desc: "Works without account integrations or open APIs" },
+      { icon: BuildingsIcon, title: "Personal + business", desc: "One core for every money flow you have" }
+    ];
 
   return (
     <div className="min-h-screen bg-[rgb(var(--background))]">
@@ -108,7 +108,7 @@ export default async function LandingPage({
                 </div>
               </div>
               <div className="bg-[rgb(var(--surface-soft))] px-4 py-3 text-sm text-[rgb(var(--muted))]">
-                {isRu ? "Нашёл 1 транзакцию. Подтвердить?" : "Found 1 transaction. Confirm?"}
+                {isRu ? "Нашел 1 транзакцию. Подтвердить?" : "Found 1 transaction. Confirm?"}
               </div>
               <div className="border-t border-[rgb(var(--border-soft))] px-4 py-3">
                 <div className="flex items-center justify-between">

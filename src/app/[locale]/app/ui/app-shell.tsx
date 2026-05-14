@@ -4,7 +4,8 @@ import { apiFetch } from "@/shared/api/client";
 import { useI18n } from "@/shared/i18n/i18n-provider";
 import { AppIcons } from "@/shared/icons/app-icons";
 import { createSupabaseBrowserClient } from "@/shared/lib/supabase/client";
-import { LucaProvider, LucaWorkspace, useLuca } from "@/shared/providers/luca-provider";
+import { LucaProvider, useLuca } from "@/shared/providers/luca-provider";
+import type { LucaFeatureFlag, LucaWorkspace } from "@/shared/providers/luca-provider";
 import {
   ArrowLineLeftIcon,
   ArrowLineRightIcon,
@@ -20,6 +21,19 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { OnboardingCurrencyDialog } from "./onboarding-currency-dialog";
 
+type NavItem = {
+  href: string;
+  labelKey: string;
+  icon: typeof AppIcons.chat;
+  feature?: LucaFeatureFlag;
+  primary?: boolean;
+};
+
+type NavGroup = {
+  key: string;
+  items: NavItem[];
+};
+
 function formatRelativeTime(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diffMs / 60_000);
@@ -32,19 +46,35 @@ function formatRelativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-// Settings removed from nav — accessible via footer three-dot menu
-const nav = [
-  { href: "/app",               labelKey: "navigation.chat",         icon: AppIcons.chat },
-  { href: "/app/dashboard",     labelKey: "navigation.dashboard",    icon: AppIcons.dashboard },
-  { href: "/app/transactions",  labelKey: "navigation.transactions", icon: AppIcons.transactions },
-  { href: "/app/accounts",      labelKey: "navigation.accounts",     icon: AppIcons.accounts },
-  { href: "/app/categories",    labelKey: "navigation.categories",   icon: AppIcons.categories },
-  { href: "/app/budget",        labelKey: "navigation.budget",       icon: AppIcons.budget },
-  { href: "/app/reports",         labelKey: "navigation.reports",        icon: AppIcons.reports },
-  { href: "/app/goals",           labelKey: "navigation.goals",          icon: AppIcons.goals },
-  { href: "/app/net-worth",        labelKey: "navigation.netWorth",       icon: AppIcons.netWorth },
-  { href: "/app/exchange-rates",  labelKey: "navigation.exchangeRates",  icon: AppIcons.exchangeRates },
+const navGroups: NavGroup[] = [
+  {
+    key: "primary",
+    items: [
+      { href: "/app", labelKey: "navigation.chat", icon: AppIcons.chat, primary: true },
+      { href: "/app/dashboard", labelKey: "navigation.dashboard", icon: AppIcons.dashboard, feature: "dashboard" as LucaFeatureFlag },
+    ],
+  },
+  {
+    key: "money",
+    items: [
+      { href: "/app/transactions", labelKey: "navigation.transactions", icon: AppIcons.transactions },
+      { href: "/app/accounts", labelKey: "navigation.accounts", icon: AppIcons.accounts },
+      { href: "/app/categories", labelKey: "navigation.categories", icon: AppIcons.categories },
+    ],
+  },
+  {
+    key: "planning",
+    items: [
+      { href: "/app/budget", labelKey: "navigation.budget", icon: AppIcons.budget },
+      { href: "/app/reports", labelKey: "navigation.reports", icon: AppIcons.reports },
+      { href: "/app/goals", labelKey: "navigation.goals", icon: AppIcons.goals, feature: "goals" as LucaFeatureFlag },
+      { href: "/app/net-worth", labelKey: "navigation.netWorth", icon: AppIcons.netWorth, feature: "netWorth" as LucaFeatureFlag },
+      { href: "/app/exchange-rates", labelKey: "navigation.exchangeRates", icon: AppIcons.exchangeRates, feature: "exchangeRates" as LucaFeatureFlag },
+    ],
+  },
 ];
+
+const nav = navGroups.flatMap((group) => group.items);
 
 const SIDEBAR_COLLAPSED_KEY = "luca-sidebar-collapsed";
 
@@ -70,40 +100,65 @@ function SidebarNav({
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
-  const { t } = useI18n();
+  const { t, locale: currentLocale } = useI18n();
+  const { isFeatureEnabled } = useLuca();
+
+  const groupLabel = (key: string) => {
+    if (currentLocale === "ru") {
+      if (key === "money") return "Деньги";
+      if (key === "planning") return "Планирование";
+      return "Главное";
+    }
+    if (key === "money") return "Money";
+    if (key === "planning") return "Planning";
+    return "Home";
+  };
 
   return (
-    <nav className="shrink-0 px-2 py-1">
-      <div className="space-y-px">
-        {nav.map((item) => {
-          const Icon = item.icon;
-          const href = `/${locale}${item.href}`;
-          const isActive =
-            item.href === "/app" ? pathname === href : pathname.startsWith(href);
+    <nav className="shrink-0 px-2 py-2">
+      <div className="space-y-3">
+        {navGroups.map((group) => (
+          <div key={group.key}>
+            {!collapsed && (
+              <div className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-[rgb(var(--muted-soft))]">
+                {groupLabel(group.key)}
+              </div>
+            )}
+            <div className="space-y-1">
+              {group.items.filter((item) => !item.feature || isFeatureEnabled(item.feature)).map((item) => {
+                const Icon = item.icon;
+                const href = `/${locale}${item.href}`;
+                const isActive =
+                  item.href === "/app" ? pathname === href : pathname.startsWith(href);
 
-          return (
-            <Link
-              key={item.href}
-              href={href}
-              onClick={onNavigate}
-              title={collapsed ? t(item.labelKey) : undefined}
-              className={[
-                "flex items-center rounded-lg transition-colors duration-100",
-                collapsed
-                  ? "h-9 w-9 justify-center mx-auto"
-                  : "gap-2.5 px-3 py-[7px]",
-                isActive
-                  ? "bg-[rgb(var(--surface-soft))] font-medium text-[rgb(var(--foreground))]"
-                  : "font-normal text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]",
-              ].join(" ")}
-            >
-              <Icon size={16} weight="regular" className="shrink-0" />
-              {!collapsed && (
-                <span className="text-sm">{t(item.labelKey)}</span>
-              )}
-            </Link>
-          );
-        })}
+                return (
+                  <Link
+                    key={item.href}
+                    href={href}
+                    onClick={onNavigate}
+                    title={collapsed ? t(item.labelKey) : undefined}
+                    className={[
+                      "flex items-center rounded-lg transition-colors duration-100",
+                      collapsed
+                        ? "h-9 w-9 justify-center mx-auto"
+                        : "gap-2.5 px-3 py-2",
+                      isActive
+                        ? item.primary
+                          ? "bg-[rgb(var(--foreground))] font-medium text-[rgb(var(--background))]"
+                          : "bg-[rgb(var(--surface-soft))] font-medium text-[rgb(var(--foreground))]"
+                        : "font-normal text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]",
+                    ].join(" ")}
+                  >
+                    <Icon size={16} weight="regular" className="shrink-0" />
+                    {!collapsed && (
+                      <span className="text-sm">{t(item.labelKey)}</span>
+                    )}
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
     </nav>
   );
@@ -217,16 +272,14 @@ function ChatSessionsList({
 
 /* ── Workspace switcher popup ───────────────────────── */
 function WorkspaceSwitcherPopup({
-  locale,
   onSwitch,
   onClose,
 }: {
-  locale: string;
   onSwitch: (id: string) => void;
   onClose: () => void;
 }) {
   const { t } = useI18n();
-  const { workspaces, workspace } = useLuca();
+  const { workspaces, workspace, billing } = useLuca();
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -247,10 +300,15 @@ function WorkspaceSwitcherPopup({
     }
   }
 
+  const workspaceLimit =
+    Number(billing?.entitlements.workspace_limit ?? 1) +
+    Number(billing?.entitlements.extra_workspace_slots ?? 0);
+  const canCreateWorkspace = workspaceLimit <= 0 || workspaces.length < workspaceLimit;
+
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} />
-      <div className="absolute bottom-full left-0 right-0 z-50 mb-1 mx-0 overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--background))] shadow-xl">
+      <div className="absolute bottom-full left-0 right-0 z-50 mb-1 mx-0 overflow-hidden rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-raised))] shadow-xl">
         <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-[rgb(var(--muted-soft))]">
           {t("workspace.switcher")}
         </div>
@@ -287,7 +345,7 @@ function WorkspaceSwitcherPopup({
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") createWorkspace();
+                  if (e.key === "Enter" && canCreateWorkspace) createWorkspace();
                   if (e.key === "Escape") setShowCreate(false);
                 }}
                 placeholder={t("workspace.newName")}
@@ -296,7 +354,7 @@ function WorkspaceSwitcherPopup({
               <div className="flex gap-1.5">
                 <button
                   onClick={createWorkspace}
-                  disabled={creating || !newName.trim()}
+                  disabled={creating || !newName.trim() || !canCreateWorkspace}
                   className="flex-1 rounded-lg bg-[rgb(var(--foreground))] py-1.5 text-xs font-medium text-[rgb(var(--background))] disabled:opacity-40"
                 >
                   {creating ? "..." : t("common.save")}
@@ -311,11 +369,12 @@ function WorkspaceSwitcherPopup({
             </div>
           ) : (
             <button
-              onClick={() => setShowCreate(true)}
+              onClick={() => canCreateWorkspace && setShowCreate(true)}
+              disabled={!canCreateWorkspace}
               className="flex w-full items-center gap-2 px-3 py-2 text-sm text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
             >
               <PlusIcon size={13} weight="bold" />
-              {t("workspace.new")}
+              {canCreateWorkspace ? t("workspace.new") : `${workspaces.length}/${workspaceLimit} ${t("workspace.switcher")}`}
             </button>
           )}
         </div>
@@ -367,7 +426,7 @@ function SettingsMenuPopup({
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} />
-      <div className="absolute bottom-full right-0 z-50 mb-1 w-52 overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--background))] shadow-xl">
+      <div className="absolute bottom-full right-0 z-50 mb-1 w-52 overflow-hidden rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-raised))] shadow-xl">
         <div className="py-1">
           {menuItems.map((item) => {
             const Icon = item.icon;
@@ -438,7 +497,6 @@ function SidebarFooter({
     >
       {popup === "workspace" && !collapsed && (
         <WorkspaceSwitcherPopup
-          locale={locale}
           onSwitch={setWorkspaceId}
           onClose={closePopup}
         />
@@ -498,7 +556,7 @@ function Sidebar({
   return (
     <aside
       className={[
-        "fixed inset-y-0 left-0 z-30 hidden flex-col border-r border-[rgb(var(--border-soft))] bg-[rgb(var(--background))] transition-all duration-200 lg:flex",
+        "fixed inset-y-0 left-0 z-30 hidden flex-col border-r border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-raised))] transition-all duration-200 lg:flex",
         collapsed ? "w-16" : "w-[var(--sidebar-width)]",
       ].join(" ")}
     >
@@ -512,7 +570,7 @@ function Sidebar({
         {!collapsed && (
           <Link
             href={`/${locale}/app`}
-            className="text-[15px] font-semibold tracking-tight text-[rgb(var(--foreground))]"
+            className="flex items-center gap-2 text-[15px] font-semibold tracking-tight text-[rgb(var(--foreground))]"
           >
             LUCA
           </Link>
@@ -566,7 +624,7 @@ function MobileSidebar({
       />
       <aside
         className={[
-          "fixed inset-y-0 left-0 z-50 flex w-[var(--sidebar-width)] flex-col border-r border-[rgb(var(--border-soft))] bg-[rgb(var(--background))] shadow-2xl transition-transform duration-300 ease-out lg:hidden",
+          "fixed inset-y-0 left-0 z-50 flex w-[var(--sidebar-width)] flex-col border-r border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-raised))] shadow-2xl transition-transform duration-300 ease-out lg:hidden",
           open ? "translate-x-0" : "-translate-x-full",
         ].join(" ")}
       >
@@ -600,7 +658,7 @@ function Header({ locale, onMenuOpen }: { locale: string; onMenuOpen: () => void
   const pageTitle = usePageTitle(locale);
 
   return (
-    <header className="sticky top-0 z-20 flex h-[var(--header-height)] shrink-0 items-center border-b border-[rgb(var(--border-soft))] bg-[rgb(var(--background))]/95 px-4 backdrop-blur-sm lg:hidden">
+    <header className="sticky top-0 z-20 flex h-[var(--header-height)] shrink-0 items-center border-b border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-raised))]/95 px-4 backdrop-blur-sm lg:hidden">
       <button
         onClick={onMenuOpen}
         className="mr-3 flex h-8 w-8 items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))]"

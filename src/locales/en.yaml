@@ -187,6 +187,8 @@ goals:
   progress: "Progress"
   completed: "Completed"
   active: "Active"
+  addContribution: "Add saved money"
+  contributionPlaceholder: "Amount saved"
 
 settings:
   title: "Settings"
@@ -205,6 +207,10 @@ settings:
   addAccount: "Add account"
   accountName: "Account name"
   saved: "Saved"
+  quickActions: "Quick actions"
+  workspaceBasics: "Workspace basics"
+  accountSetup: "Account setup"
+  dangerZone: "Session"
 
 workspace:
   switcher: "Workspaces"

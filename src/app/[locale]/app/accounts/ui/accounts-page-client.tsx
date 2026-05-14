@@ -184,7 +184,7 @@ export function AccountsPageClient() {
     f.type === "CARD" || f.isDebt;
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="luca-page space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

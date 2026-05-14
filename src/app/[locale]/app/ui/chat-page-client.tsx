@@ -18,8 +18,8 @@ import { useI18n } from "@/shared/i18n/i18n-provider";
 import { useLuca } from "@/shared/providers/luca-provider";
 import { AccountPicker } from "@/shared/ui/account-picker";
 import {
-  ArrowDownIcon,
   ArrowClockwiseIcon,
+  ArrowDownIcon,
   ArrowUpIcon,
   BankIcon,
   CameraIcon,
@@ -93,20 +93,14 @@ type Message = {
 const INTRO_ID = "intro";
 
 const EXAMPLE_PROMPTS_EN = [
-  "How much did I spend this month?",
-  "Spent $50 on groceries",
-  "Show my budget status",
-  "What are my top spending categories?",
-  "Received salary $3000",
-  "Transfer $200 to savings account",
+  "Show my cash flow for this month",
+  "Which categories are over budget?",
+  "Export my recent business expenses",
 ];
 const EXAMPLE_PROMPTS_RU = [
-  "Сколько я потратил в этом месяце?",
-  "Потратил 2000₽ в продуктовом",
-  "Покажи статус моих бюджетов",
-  "Мои топ-категории расходов",
-  "Получил зарплату 80 000₽",
-  "Перевёл 5000₽ на сберегательный счёт",
+  "Покажи cash flow за этот месяц",
+  "Какие категории вышли за бюджет?",
+  "Покажи последние бизнес-расходы",
 ];
 
 function extractOperations(payloadJson: Record<string, unknown>): AiOperation[] {
@@ -146,7 +140,7 @@ export function ChatPageClient() {
     if (!workspace) return;
     apiFetch<{ categories: ChatCategory[] }>(`/api/categories?workspaceId=${workspace.id}`)
       .then((r) => setCategories(r.categories))
-      .catch(() => {});
+      .catch(() => { });
   }, [workspace]);
 
   const sessionWasCreatedByUs = useRef(new Set<string>());
@@ -197,9 +191,9 @@ export function ChatPageClient() {
       messages: Array<{
         id: string;
         role: string;
-          content: string;
-          answerPayload?: AnswerPayload | null;
-          action?: {
+        content: string;
+        answerPayload?: AnswerPayload | null;
+        action?: {
           id: string;
           status: string;
           payloadJson: Record<string, unknown>;
@@ -424,11 +418,11 @@ export function ChatPageClient() {
         prev.map((m) =>
           m.id === assistantMsgId
             ? {
-                ...m,
-                content: data.message,
-                streaming: false,
-                action: { id: data.actionId!, status: "PENDING", operations: data.operations, overrides },
-              }
+              ...m,
+              content: data.message,
+              streaming: false,
+              action: { id: data.actionId!, status: "PENDING", operations: data.operations, overrides },
+            }
             : m
         )
       );
@@ -652,7 +646,6 @@ export function ChatPageClient() {
               onReceiptFile={scanReceipt}
               onGrow={growTextarea}
               t={t}
-              locale={locale}
             />
 
             {/* Suggestion chips */}
@@ -674,7 +667,7 @@ export function ChatPageClient() {
       ) : (
         /* ── Conversation ── */
         <div className="flex-1 overflow-y-auto thin-scrollbar">
-          <div className="mx-auto max-w-2xl space-y-4 px-3 py-6 sm:px-4 lg:px-6">
+          <div className="mx-auto max-w-3xl space-y-5 px-3 py-6 sm:px-4 lg:px-6">
             {messages
               .filter((m) => m.id !== INTRO_ID)
               .map((message) => (
@@ -700,7 +693,7 @@ export function ChatPageClient() {
       {/* ── Input bar (conversation mode) ── */}
       {hasUserMessages && (
         <div className="shrink-0 pb-[env(safe-area-inset-bottom)]">
-          <div className="mx-auto max-w-2xl px-3 py-3 sm:px-4 lg:px-6">
+          <div className="mx-auto max-w-3xl px-3 py-3 sm:px-4 lg:px-6">
             <ChatInput
               textareaRef={textareaRef}
               fileInputRef={fileInputRef}
@@ -715,7 +708,6 @@ export function ChatPageClient() {
               onReceiptFile={scanReceipt}
               onGrow={growTextarea}
               t={t}
-              locale={locale}
             />
           </div>
         </div>
@@ -740,7 +732,6 @@ function ChatInput({
   onReceiptFile,
   onGrow,
   t,
-  locale,
 }: {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
@@ -755,14 +746,13 @@ function ChatInput({
   onReceiptFile: (file: File) => void;
   onGrow: (el: HTMLTextAreaElement) => void;
   t: (key: string) => string;
-  locale: string;
 }) {
   const busy = isSending || isReceiptScanning;
 
   return (
     <div
       className={[
-        "flex items-end gap-2 rounded-2xl border bg-[rgb(var(--surface))] px-3 py-2 shadow-sm transition-colors sm:px-4",
+        "flex items-end gap-2 rounded-lg border bg-[rgb(var(--surface))] px-3 py-2 shadow-sm transition-colors sm:px-4",
         isRecording
           ? "border-[rgb(var(--negative))]"
           : "border-[rgb(var(--border))] focus-within:border-[rgb(var(--accent))]",
@@ -1228,7 +1218,7 @@ function BudgetStatusBlock({ workspaceId, t }: { workspaceId: string; t: (k: str
       `/api/budget?workspaceId=${workspaceId}&year=${now.getFullYear()}&month=${now.getMonth() + 1}`
     )
       .then((r) => setBudgets(r.budgets))
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false));
   }, [workspaceId]);
 
@@ -1273,7 +1263,7 @@ function GoalsStatusBlock({ workspaceId, t }: { workspaceId: string; t: (k: stri
   useEffect(() => {
     apiFetch<{ goals: GoalItem[] }>(`/api/goals?workspaceId=${workspaceId}`)
       .then((r) => setGoals(r.goals.filter((g) => g.status === "ACTIVE")))
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false));
   }, [workspaceId]);
 
@@ -1324,7 +1314,7 @@ function SpendingChartBlock({ workspaceId }: { workspaceId: string }) {
         setData(r.categoryBreakdown.slice(0, 8));
         setCurrency(r.currency);
       })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false));
   }, [workspaceId]);
 
@@ -1362,7 +1352,7 @@ function RecentTxBlock({ workspaceId, locale }: { workspaceId: string; locale: s
   useEffect(() => {
     apiFetch<{ transactions: TxItem[] }>(`/api/transactions?workspaceId=${workspaceId}&limit=8`)
       .then((r) => setTxs(r.transactions))
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false));
   }, [workspaceId]);
 
@@ -1477,8 +1467,8 @@ function MessageRow({
         {/* DisplayType rich block — shown after streaming ends */}
         {!message.streaming && (message.answerPayload || message.displayType) && !message.action && !message.confirmed && !message.rejected &&
           (message.answerPayload || !["text", "confirm_transaction", "confirm_operation"].includes(message.displayType ?? "text")) && (
-          <DisplayTypeBlock displayType={message.displayType ?? "text"} answerPayload={message.answerPayload} t={t} locale={locale} />
-        )}
+            <DisplayTypeBlock displayType={message.displayType ?? "text"} answerPayload={message.answerPayload} t={t} locale={locale} />
+          )}
 
         {/* Pending confirmation */}
         {message.action && (
@@ -1798,7 +1788,7 @@ function TxConfirmCard({
                 value={effectiveAccountId ?? undefined}
                 onChange={(id) => onUpdateOverride({ accountId: id })}
                 label={tx.type === "TRANSFER"
-                  ? (locale === "ru" ? "Счёт (откуда)" : "From account")
+                  ? (locale === "ru" ? "Счет (откуда)" : "From account")
                   : t("transactions.account")}
               />
             )}
@@ -1810,7 +1800,7 @@ function TxConfirmCard({
               accounts={accounts.filter((a) => a.id !== effectiveAccountId)}
               value={override?.toAccountId ?? undefined}
               onChange={(id) => onUpdateOverride({ toAccountId: id })}
-              label={locale === "ru" ? "Счёт (куда)" : "To account"}
+              label={locale === "ru" ? "Счет (куда)" : "To account"}
             />
           )}
 
@@ -1885,7 +1875,7 @@ function OperationConfirmCard({
     case "CREATE_CATEGORIES":
       return <CategoriesConfirmCard op={op as CreateCategoriesOp} t={t} />;
     case "SET_BUDGET":
-      return <BudgetConfirmCard op={op as SetBudgetOp} t={t} locale={locale} />;
+      return <BudgetConfirmCard op={op as SetBudgetOp} t={t} />;
     case "CREATE_GOAL":
       return <GoalConfirmCard op={op as CreateGoalOp} t={t} locale={locale} />;
     case "DELETE_TRANSACTIONS":
@@ -2059,7 +2049,7 @@ function CategoriesConfirmCard({ op, t }: { op: CreateCategoriesOp; t: (key: str
   );
 }
 
-function BudgetConfirmCard({ op, t, locale }: { op: SetBudgetOp; t: (key: string) => string; locale: string }) {
+function BudgetConfirmCard({ op, t }: { op: SetBudgetOp; t: (key: string) => string }) {
   const periodLabel: Record<string, string> = {
     MONTHLY: t("budget.monthly"),
     QUARTERLY: t("budget.quarterly"),

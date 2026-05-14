@@ -133,7 +133,7 @@ export function ReportsPageClient() {
     "rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2.5 py-1.5 text-sm text-[rgb(var(--foreground))] focus:outline-none focus:ring-1 focus:ring-[rgb(var(--accent))]";
 
   return (
-    <div className="max-w-2xl space-y-5">
+    <div className="luca-page space-y-5">
       {/* Header with period selector */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>

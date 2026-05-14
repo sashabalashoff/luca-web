@@ -78,12 +78,16 @@ export function DashboardPageClient() {
   );
 
   return (
-    <div className="max-w-4xl space-y-6">
+    <div className="luca-page-wide space-y-6">
       {loadError && (
         <div className="rounded-xl border border-[rgb(var(--negative-dim))] bg-[rgb(var(--negative-dim))] px-4 py-3 text-sm text-[rgb(var(--negative))]">
           {t("common.errorLoading")}
         </div>
       )}
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">{t("dashboard.title")}</h1>
+        <p className="mt-1 text-sm text-[rgb(var(--muted))]">{t("dashboard.subtitle")}</p>
+      </div>
       {/* ── Account balances ── */}
       {accounts.length > 0 && (
         <div>

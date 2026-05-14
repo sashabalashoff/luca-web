@@ -21,6 +21,30 @@ export type LucaAccount = {
   isDebt?: boolean;
 };
 
+export type LucaFeatureFlag =
+  | "dashboard"
+  | "goals"
+  | "exchangeRates"
+  | "netWorth"
+  | "workspaceMembers"
+  | "manualBilling"
+  | "reportBuilder";
+
+export type LucaAppConfig = {
+  version: string;
+  releaseDate: string;
+  flags: Record<LucaFeatureFlag, boolean>;
+};
+
+export type LucaBillingStatus = {
+  entitlements: Record<string, unknown>;
+  subscriptions: Array<{
+    id: string;
+    status: string;
+    plan: { type: "FREE" | "PERSONAL" | "BUSINESS"; name: string };
+  }>;
+};
+
 const WORKSPACE_KEY = "luca-workspace-id";
 
 const REGION_CURRENCY: Record<string, string> = {
@@ -51,12 +75,29 @@ type LucaContextValue = {
   transactionKey: number;
   isNewUser: boolean;
   isViewer: boolean;
+  appConfig: LucaAppConfig;
+  billing: LucaBillingStatus | null;
+  isFeatureEnabled: (flag: LucaFeatureFlag) => boolean;
   setWorkspaceId: (id: string) => void;
   reload: () => Promise<void>;
   confirmOnboarding: (currency: string) => Promise<void>;
 };
 
 const LucaContext = createContext<LucaContextValue | null>(null);
+
+const DEFAULT_APP_CONFIG: LucaAppConfig = {
+  version: "2026.5.14+1",
+  releaseDate: "2026-05-14",
+  flags: {
+    dashboard: false,
+    goals: false,
+    exchangeRates: false,
+    netWorth: false,
+    workspaceMembers: true,
+    manualBilling: true,
+    reportBuilder: true,
+  },
+};
 
 export function LucaProvider({ children }: { children: React.ReactNode }) {
   const [workspaces, setWorkspaces] = useState<LucaWorkspace[]>([]);
@@ -65,6 +106,8 @@ export function LucaProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [transactionKey, setTransactionKey] = useState(0);
   const [isNewUser, setIsNewUser] = useState(false);
+  const [appConfig, setAppConfig] = useState<LucaAppConfig>(DEFAULT_APP_CONFIG);
+  const [billing, setBilling] = useState<LucaBillingStatus | null>(null);
 
   const workspace =
     workspaces.find((w) => w.id === currentWorkspaceId) ?? workspaces[0] ?? null;
@@ -82,7 +125,12 @@ export function LucaProvider({ children }: { children: React.ReactNode }) {
   async function load() {
     setIsLoading(true);
     try {
-      const bootstrapResult = await apiFetch<{ workspace: LucaWorkspace; alreadyExists: boolean }>(
+      const bootstrapResult = await apiFetch<{
+        workspace: LucaWorkspace;
+        alreadyExists: boolean;
+        app?: LucaAppConfig;
+        billing?: LucaBillingStatus;
+      }>(
         "/api/bootstrap",
         {
           method: "POST",
@@ -92,6 +140,8 @@ export function LucaProvider({ children }: { children: React.ReactNode }) {
       if (!bootstrapResult.alreadyExists) {
         setIsNewUser(true);
       }
+      if (bootstrapResult.app) setAppConfig(bootstrapResult.app);
+      if (bootstrapResult.billing) setBilling(bootstrapResult.billing);
 
       const wsResult = await apiFetch<{ workspaces: LucaWorkspace[] }>("/api/workspaces");
       setWorkspaces(wsResult.workspaces);
@@ -139,6 +189,7 @@ export function LucaProvider({ children }: { children: React.ReactNode }) {
   }
 
   const isViewer = workspace?.role === "VIEWER";
+  const isFeatureEnabled = (flag: LucaFeatureFlag) => appConfig.flags[flag] === true;
 
   return (
     <LucaContext.Provider
@@ -151,6 +202,9 @@ export function LucaProvider({ children }: { children: React.ReactNode }) {
         transactionKey,
         isNewUser,
         isViewer,
+        appConfig,
+        billing,
+        isFeatureEnabled,
         setWorkspaceId,
         reload: load,
         confirmOnboarding,

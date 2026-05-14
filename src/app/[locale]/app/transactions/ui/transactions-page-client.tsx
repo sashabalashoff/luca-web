@@ -364,7 +364,7 @@ export function TransactionsPageClient() {
   );
 
   return (
-    <div className="max-w-2xl">
+    <div className="luca-page">
       {loadError && (
         <div className="mb-4 rounded-xl border border-[rgb(var(--negative-dim))] bg-[rgb(var(--negative-dim))] px-4 py-3 text-sm text-[rgb(var(--negative))]">
           {t("common.errorLoading")}
@@ -779,14 +779,14 @@ export function TransactionsPageClient() {
           {[1, 2, 3, 4, 5].map((i) => (
             <div
               key={i}
-              className="h-14 animate-pulse rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]"
+              className="h-11 animate-pulse rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))]"
             />
           ))}
         </div>
       ) : groups.length === 0 ? (
         <div className="flex flex-col items-center py-24 text-center">
-          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[rgb(var(--surface-soft))]">
-            <span className="text-3xl opacity-30">💸</span>
+          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-[rgb(var(--surface-soft))]">
+            <span className="text-2xl opacity-30">💸</span>
           </div>
           <p className="text-sm text-[rgb(var(--muted))]">{t("transactions.empty")}</p>
           {hasActiveFilters && (
@@ -799,16 +799,16 @@ export function TransactionsPageClient() {
           )}
         </div>
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-3">
           {groups.map((group) => (
             <div key={group.iso}>
-              <div className="mb-2.5 flex items-center justify-between">
+              <div className="mb-1.5 flex items-center justify-between px-1">
                 <span className="text-xs font-semibold text-[rgb(var(--muted))]">{group.label}</span>
                 <span className="text-xs text-[rgb(var(--muted-soft))]">
                   {txCountLabel(group.items.length)}
                 </span>
               </div>
-              <div className="overflow-hidden rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
+              <div className="overflow-hidden rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
                 {group.items.map((tx, idx) => (
                   <TxRow
                     key={tx.id}
@@ -969,29 +969,29 @@ function TxRow({
     <>
       <div
         className={[
-          "group flex items-center gap-3 px-4 py-3.5 transition-colors",
+          "group flex items-center gap-2.5 px-3 py-2 transition-colors",
           !isLast && !isEditing ? "border-b border-[rgb(var(--border-soft))]" : "",
           isEditing ? "bg-[rgb(var(--surface-soft))]" : "hover:bg-[rgb(var(--surface-soft))]",
           isDeleting ? "opacity-40" : "",
         ].join(" ")}
       >
         {/* Icon */}
-        <div className={["flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-sm", iconBg].join(" ")}>
+        <div className={["flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-xs", iconBg].join(" ")}>
           {tx.category?.icon ? (
             <span className="leading-none">{tx.category.icon}</span>
           ) : isExpense ? (
-            <ArrowDownIcon size={15} weight="bold" />
+            <ArrowDownIcon size={13} weight="bold" />
           ) : isIncome ? (
-            <ArrowUpIcon size={15} weight="bold" />
+            <ArrowUpIcon size={13} weight="bold" />
           ) : (
-            <ArrowsLeftRightIcon size={15} weight="bold" />
+            <ArrowsLeftRightIcon size={13} weight="bold" />
           )}
         </div>
 
         {/* Label */}
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium text-[rgb(var(--foreground))]">{label}</div>
-          <div className="flex items-center gap-1.5">
+          <div className="truncate text-sm font-medium leading-tight text-[rgb(var(--foreground))]">{label}</div>
+          <div className="mt-0.5 flex items-center gap-1.5">
             {sub && <span className="truncate text-xs text-[rgb(var(--muted))]">{sub}</span>}
             {timeStr && (
               <span className="shrink-0 text-xs text-[rgb(var(--muted-soft))]">{timeStr}</span>
@@ -1000,7 +1000,7 @@ function TxRow({
         </div>
 
         {/* Amount */}
-        <div className={["shrink-0 text-sm font-semibold tabular-nums", amountColor].join(" ")}>
+        <div className={["shrink-0 text-right text-sm font-semibold tabular-nums", amountColor].join(" ")}>
           {isExpense ? "−" : isIncome ? "+" : ""}
           {amount.toFixed(2)} {tx.currency}
         </div>
@@ -1029,10 +1029,10 @@ function TxRow({
               <button
                 onClick={onEditToggle}
                 className={[
-                  "flex h-7 w-7 items-center justify-center rounded-lg transition-all",
+                  "flex h-7 w-7 items-center justify-center rounded-md transition-all",
                   isEditing
                     ? "bg-[rgb(var(--accent)/0.12)] text-[rgb(var(--accent))]"
-                    : "text-[rgb(var(--muted))] opacity-0 hover:bg-[rgb(var(--surface-soft))] group-hover:opacity-100",
+                    : "text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))] sm:opacity-0 sm:group-hover:opacity-100",
                 ].join(" ")}
                 title="Edit"
               >
@@ -1041,7 +1041,7 @@ function TxRow({
               <button
                 onClick={onDeleteRequest}
                 disabled={isDeleting}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[rgb(var(--muted))] opacity-0 transition-all hover:bg-[rgb(var(--negative-dim))] hover:text-[rgb(var(--negative))] group-hover:opacity-100 disabled:opacity-30"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[rgb(var(--muted))] transition-all hover:bg-[rgb(var(--negative-dim))] hover:text-[rgb(var(--negative))] disabled:opacity-30 sm:opacity-0 sm:group-hover:opacity-100"
                 title={t("common.delete")}
               >
                 <TrashIcon size={13} weight="bold" />

@@ -178,17 +178,27 @@ export function BudgetPageClient() {
     }
   }
 
-  // Summary totals
-  const totalBudget = budgets.reduce((s, b) => s + Number(b.amount), 0);
-  const totalSpent = budgets.reduce((s, b) => s + (b.spent ?? 0), 0);
-  const totalPct = totalBudget > 0 ? (totalSpent / totalBudget) * 100 : 0;
-  const currency = budgets[0]?.currency ?? workspace?.baseCurrency ?? "USD";
+  // Summary totals are grouped by currency. Mixing RUB and USD in one progress bar
+  // produces false numbers, even when every individual budget is correct.
+  const summaryGroups = Array.from(
+    budgets.reduce((map, budget) => {
+      const currencyKey = budget.currency;
+      const prev = map.get(currencyKey) ?? { currency: currencyKey, totalBudget: 0, totalSpent: 0 };
+      prev.totalBudget += Number(budget.amount);
+      prev.totalSpent += budget.spent ?? 0;
+      map.set(currencyKey, prev);
+      return map;
+    }, new Map<string, { currency: string; totalBudget: number; totalSpent: number }>())
+  ).map(([, value]) => ({
+    ...value,
+    totalPct: value.totalBudget > 0 ? (value.totalSpent / value.totalBudget) * 100 : 0,
+  }));
 
   const expenseCategories = categories.filter((c) => c.type === "EXPENSE");
   const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1;
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="luca-page space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -309,42 +319,46 @@ export function BudgetPageClient() {
         </div>
       )}
 
-      {/* Summary card */}
+      {/* Summary cards */}
       {!loading && budgets.length > 0 && (
-        <div className="rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-5">
-          <div className="flex items-end justify-between">
-            <div>
-              <div className="text-xs font-medium text-[rgb(var(--muted))]">
-                {getMonthName(month, locale)} {year} — {t("budget.summaryTotal")}
+        <div className="grid gap-3 lg:grid-cols-2">
+          {summaryGroups.map(({ currency, totalBudget, totalSpent, totalPct }) => (
+            <div key={currency} className="rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-5">
+              <div className="flex items-end justify-between">
+                <div>
+                  <div className="text-xs font-medium text-[rgb(var(--muted))]">
+                    {getMonthName(month, locale)} {year} — {t("budget.summaryTotal")} · {currency}
+                  </div>
+                  <div className="mt-1 text-2xl font-bold tabular-nums text-[rgb(var(--foreground))]">
+                    {fmt(totalSpent, currency)}
+                  </div>
+                  <div className="mt-0.5 text-sm text-[rgb(var(--muted))]">
+                    {t("budget.of")} {fmt(totalBudget, currency)} {t("budget.ofBudgeted")}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div
+                    className={[
+                      "text-xl font-bold tabular-nums",
+                      totalPct > 100
+                        ? "text-[rgb(var(--negative))]"
+                        : totalPct >= 80
+                          ? "text-amber-500"
+                          : "text-[rgb(var(--positive))]",
+                    ].join(" ")}
+                  >
+                    {totalPct.toFixed(0)}%
+                  </div>
+                  <div className="text-xs text-[rgb(var(--muted))]">
+                    {totalBudget - totalSpent >= 0
+                      ? `${fmt(totalBudget - totalSpent, currency)} ${t("budget.left")}`
+                      : `${fmt(totalSpent - totalBudget, currency)} ${t("budget.over")}`}
+                  </div>
+                </div>
               </div>
-              <div className="mt-1 text-2xl font-bold tabular-nums text-[rgb(var(--foreground))]">
-                {fmt(totalSpent, currency)}
-              </div>
-              <div className="mt-0.5 text-sm text-[rgb(var(--muted))]">
-                {t("budget.of")} {fmt(totalBudget, currency)} {t("budget.ofBudgeted")}
-              </div>
+              <ProgressBar pct={totalPct} over={totalPct > 100} />
             </div>
-            <div className="text-right">
-              <div
-                className={[
-                  "text-xl font-bold tabular-nums",
-                  totalPct > 100
-                    ? "text-[rgb(var(--negative))]"
-                    : totalPct >= 80
-                      ? "text-amber-500"
-                      : "text-[rgb(var(--positive))]",
-                ].join(" ")}
-              >
-                {totalPct.toFixed(0)}%
-              </div>
-              <div className="text-xs text-[rgb(var(--muted))]">
-                {totalBudget - totalSpent >= 0
-                  ? `${fmt(totalBudget - totalSpent, currency)} ${t("budget.left")}`
-                  : `${fmt(totalSpent - totalBudget, currency)} ${t("budget.over")}`}
-              </div>
-            </div>
-          </div>
-          <ProgressBar pct={totalPct} over={totalPct > 100} />
+          ))}
         </div>
       )}
 
