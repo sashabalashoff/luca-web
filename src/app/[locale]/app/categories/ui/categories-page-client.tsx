@@ -3,6 +3,7 @@
 import { apiFetch } from "@/shared/api/client";
 import { useI18n } from "@/shared/i18n/i18n-provider";
 import { useLuca } from "@/shared/providers/luca-provider";
+import { Modal } from "@/shared/ui/modal";
 import {
   CaretDownIcon,
   CaretRightIcon,
@@ -62,6 +63,190 @@ function getTypeLabel(type: "EXPENSE" | "INCOME", t: (key: string) => string) {
   return type === "EXPENSE" ? t("categories.expense") : t("categories.income");
 }
 
+/* ── Category form (shared between side panel and modal) ── */
+function CategoryFormContent({
+  form,
+  editingId,
+  parentOptions,
+  saving,
+  locale,
+  onChange,
+  onSave,
+  onClear,
+  t,
+}: {
+  form: CategoryForm;
+  editingId: string | null;
+  parentOptions: Category[];
+  saving: boolean;
+  locale: string;
+  onChange: (patch: Partial<CategoryForm>) => void;
+  onSave: () => void;
+  onClear: () => void;
+  t: (key: string) => string;
+}) {
+  const copy = {
+    createRoot: locale === "ru" ? "Новая категория" : "New category",
+    createSub: locale === "ru" ? "Новая подкатегория" : "New subcategory",
+    edit: locale === "ru" ? "Редактирование" : "Editing",
+    root: locale === "ru" ? "Без родителя" : "Root category",
+    clear: locale === "ru" ? "Очистить" : "Clear",
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Name */}
+      <div>
+        <label className="mb-1.5 block text-xs font-semibold text-[rgb(var(--muted))]">
+          {t("categories.name")}
+        </label>
+        <input
+          autoFocus
+          value={form.name}
+          onChange={(e) => onChange({ name: e.target.value })}
+          onKeyDown={(e) => { if (e.key === "Enter") onSave(); }}
+          placeholder={locale === "ru" ? "Например, продукты" : "e.g. Groceries"}
+          className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+        />
+      </div>
+
+      {/* Type (create only) */}
+      {!editingId && (
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold text-[rgb(var(--muted))]">
+            {t("transactions.filterAll")}
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            {(["EXPENSE", "INCOME"] as const).map((type) => (
+              <button
+                key={type}
+                onClick={() => onChange({ type, parentId: "", color: type === "EXPENSE" ? "#dc2626" : "#16a34a" })}
+                className={[
+                  "h-9 rounded-lg border text-sm font-medium transition",
+                  form.type === type
+                    ? "border-[rgb(var(--foreground))] bg-[rgb(var(--foreground))] text-[rgb(var(--background))]"
+                    : "border-[rgb(var(--border))] text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))]",
+                ].join(" ")}
+              >
+                {getTypeLabel(type, t)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Parent category */}
+      {parentOptions.length > 0 && (
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold text-[rgb(var(--muted))]">
+            {t("categories.parent")}
+          </label>
+          <select
+            value={form.parentId}
+            onChange={(e) => onChange({ parentId: e.target.value })}
+            className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+          >
+            <option value="">{copy.root}</option>
+            {parentOptions.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.icon ? `${c.icon} ` : ""}{c.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Icon */}
+      <div>
+        <label className="mb-1.5 block text-xs font-semibold text-[rgb(var(--muted))]">
+          {t("categories.icon")}
+        </label>
+        <div className="grid grid-cols-10 gap-1.5">
+          {ICON_PRESETS.map((icon) => (
+            <button
+              key={icon}
+              onClick={() => onChange({ icon })}
+              className={[
+                "flex h-8 items-center justify-center rounded-lg border text-base transition hover:bg-[rgb(var(--surface-soft))]",
+                form.icon === icon
+                  ? "border-[rgb(var(--foreground))] bg-[rgb(var(--surface-soft))]"
+                  : "border-[rgb(var(--border-soft))]",
+              ].join(" ")}
+            >
+              {icon}
+            </button>
+          ))}
+        </div>
+        <input
+          value={form.icon}
+          onChange={(e) => onChange({ icon: e.target.value })}
+          placeholder={locale === "ru" ? "Или свой символ" : "Or custom symbol"}
+          className="mt-2 h-9 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+        />
+      </div>
+
+      {/* Color */}
+      <div>
+        <label className="mb-1.5 block text-xs font-semibold text-[rgb(var(--muted))]">
+          {t("categories.color")}
+        </label>
+        <div className="flex flex-wrap gap-1.5">
+          {COLOR_PRESETS.map((color) => (
+            <button
+              key={color}
+              onClick={() => onChange({ color })}
+              className="flex h-7 w-7 items-center justify-center rounded-lg"
+              style={{ background: color }}
+            >
+              {form.color === color && <CheckIcon size={11} weight="bold" className="text-white drop-shadow" />}
+            </button>
+          ))}
+          <input
+            type="color"
+            value={form.color}
+            onChange={(e) => onChange({ color: e.target.value })}
+            className="h-7 w-9 cursor-pointer rounded-lg border border-[rgb(var(--border))] bg-transparent"
+          />
+        </div>
+      </div>
+
+      {/* Preview */}
+      <div className="rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] p-3">
+        <div className="mb-2 text-xs font-semibold text-[rgb(var(--muted))]">
+          {t("categories.previewLabel")}
+        </div>
+        <div className="flex items-center gap-3">
+          <CategoryMark category={{ icon: form.icon, color: form.color }} />
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold">{form.name || t("categories.name")}</div>
+            <div className="text-xs text-[rgb(var(--muted))]">
+              {form.parentId ? (locale === "ru" ? "Подкатегория" : "Subcategory") : (locale === "ru" ? "Корневая" : "Root")}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div className="flex gap-2">
+        <button
+          onClick={onSave}
+          disabled={saving || !form.name.trim()}
+          className="h-10 flex-1 rounded-lg bg-[rgb(var(--foreground))] text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85 disabled:opacity-40"
+        >
+          {saving ? t("common.loading") : t("common.save")}
+        </button>
+        <button
+          onClick={onClear}
+          className="h-10 rounded-lg border border-[rgb(var(--border))] px-4 text-sm font-medium text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
+        >
+          {copy.clear}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Main page ─────────────────────────────────────── */
 export function CategoriesPageClient() {
   const { t, locale } = useI18n();
   const { workspace } = useLuca();
@@ -76,15 +261,7 @@ export function CategoriesPageClient() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<CategoryForm>(EMPTY_FORM);
-
-  const copy = {
-    createRoot: locale === "ru" ? "Новая категория" : "New category",
-    createSub: locale === "ru" ? "Новая подкатегория" : "New subcategory",
-    edit: locale === "ru" ? "Редактирование" : "Editing",
-    root: locale === "ru" ? "Без родителя" : "Root category",
-    clear: locale === "ru" ? "Очистить" : "Clear",
-    defaultBadge: locale === "ru" ? "системная" : "default",
-  };
+  const [formOpen, setFormOpen] = useState(false);
 
   function loadCategories() {
     if (!workspace) return;
@@ -112,6 +289,11 @@ export function CategoriesPageClient() {
     setForm({ ...EMPTY_FORM, type, parentId, color: type === "EXPENSE" ? "#dc2626" : "#16a34a" });
   }
 
+  function openCreate(type: "EXPENSE" | "INCOME" = activeType, parentId = "") {
+    resetForm(type, parentId);
+    setFormOpen(true);
+  }
+
   function editCategory(category: Category) {
     const type = category.type === "INCOME" ? "INCOME" : "EXPENSE";
     setActiveType(type);
@@ -124,6 +306,7 @@ export function CategoriesPageClient() {
       color: category.color ?? (type === "EXPENSE" ? "#dc2626" : "#16a34a"),
       parentId: category.parentId ?? "",
     });
+    setFormOpen(true);
   }
 
   async function saveCategory() {
@@ -153,6 +336,7 @@ export function CategoriesPageClient() {
           }),
         });
       }
+      setFormOpen(false);
       resetForm(form.type);
       loadCategories();
     } catch (err) {
@@ -166,8 +350,8 @@ export function CategoriesPageClient() {
     try {
       await apiFetch(`/api/categories/${id}`, { method: "DELETE" });
       setDeleteConfirmId(null);
-      if (editingId === id) resetForm(activeType);
-      setCategories((prev) => prev.filter((category) => category.id !== id));
+      if (editingId === id) { resetForm(activeType); setFormOpen(false); }
+      setCategories((prev) => prev.filter((c) => c.id !== id));
     } catch (err) {
       console.error(err);
     }
@@ -182,24 +366,30 @@ export function CategoriesPageClient() {
     });
   }
 
-  const typedCategories = categories.filter((category) => category.type === activeType);
-  const roots = typedCategories.filter((category) => !category.parentId);
+  const typedCategories = categories.filter((c) => c.type === activeType);
+  const roots = typedCategories.filter((c) => !c.parentId);
   const childrenByParent = new Map<string, Category[]>();
-  for (const category of typedCategories) {
-    if (!category.parentId) continue;
-    const children = childrenByParent.get(category.parentId) ?? [];
-    children.push(category);
-    childrenByParent.set(category.parentId, children);
+  for (const c of typedCategories) {
+    if (!c.parentId) continue;
+    const arr = childrenByParent.get(c.parentId) ?? [];
+    arr.push(c);
+    childrenByParent.set(c.parentId, arr);
   }
 
   const visibleRoots = roots.filter((root) => {
     const children = childrenByParent.get(root.id) ?? [];
-    return categoryMatches(root, search) || children.some((child) => categoryMatches(child, search));
+    return categoryMatches(root, search) || children.some((ch) => categoryMatches(ch, search));
   });
 
-  const parentOptions = roots.filter((category) => category.id !== editingId);
-  const incomeCount = categories.filter((category) => category.type === "INCOME").length;
-  const expenseCount = categories.filter((category) => category.type === "EXPENSE").length;
+  const parentOptions = roots.filter((c) => c.id !== editingId);
+  const incomeCount = categories.filter((c) => c.type === "INCOME").length;
+  const expenseCount = categories.filter((c) => c.type === "EXPENSE").length;
+
+  const formTitle = editingId
+    ? (locale === "ru" ? "Редактировать" : "Edit category")
+    : form.parentId
+      ? (locale === "ru" ? "Новая подкатегория" : "New subcategory")
+      : (locale === "ru" ? "Новая категория" : "New category");
 
   return (
     <div className="luca-page-wide space-y-5">
@@ -209,13 +399,14 @@ export function CategoriesPageClient() {
         </div>
       )}
 
+      {/* Header */}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{t("categories.title")}</h1>
           <p className="mt-1 text-sm text-[rgb(var(--muted))]">{t("categories.subtitle")}</p>
         </div>
         <button
-          onClick={() => resetForm(activeType)}
+          onClick={() => openCreate(activeType)}
           className="flex h-10 items-center gap-2 rounded-lg bg-[rgb(var(--foreground))] px-4 text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85"
         >
           <PlusIcon size={15} weight="bold" />
@@ -223,295 +414,187 @@ export function CategoriesPageClient() {
         </button>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <section className="space-y-4">
-          <div className="luca-panel p-3">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-              <div className="flex rounded-lg bg-[rgb(var(--surface-soft))] p-1">
-                {(["EXPENSE", "INCOME"] as const).map((type) => {
-                  const active = activeType === type;
-                  const count = type === "EXPENSE" ? expenseCount : incomeCount;
-                  return (
-                    <button
-                      key={type}
-                      onClick={() => {
-                        setActiveType(type);
-                        resetForm(type);
-                      }}
-                      className={[
-                        "flex h-9 min-w-[132px] items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition",
-                        active
-                          ? "bg-[rgb(var(--surface))] text-[rgb(var(--foreground))] shadow-sm"
-                          : "text-[rgb(var(--muted))] hover:text-[rgb(var(--foreground))]",
-                      ].join(" ")}
-                    >
-                      {getTypeLabel(type, t)}
-                      <span className="rounded-full bg-[rgb(var(--surface-soft))] px-1.5 py-0.5 text-[10px] font-semibold text-[rgb(var(--muted))]">
-                        {count}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="relative min-w-0 flex-1">
-                <MagnifyingGlassIcon
-                  size={15}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-[rgb(var(--muted))]"
-                />
-                <input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder={t("categories.search")}
-                  className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] pl-9 pr-9 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
-                />
-                {search && (
-                  <button
-                    onClick={() => setSearch("")}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[rgb(var(--muted))] hover:text-[rgb(var(--foreground))]"
-                  >
-                    <XIcon size={13} />
-                  </button>
-                )}
-              </div>
-            </div>
+      {/* Type tabs + search */}
+      <div className="luca-panel p-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="flex rounded-lg bg-[rgb(var(--surface-soft))] p-1">
+            {(["EXPENSE", "INCOME"] as const).map((type) => {
+              const active = activeType === type;
+              const count = type === "EXPENSE" ? expenseCount : incomeCount;
+              return (
+                <button
+                  key={type}
+                  onClick={() => {
+                    setActiveType(type);
+                    resetForm(type);
+                  }}
+                  className={[
+                    "flex h-9 min-w-[120px] items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition",
+                    active
+                      ? "bg-[rgb(var(--surface))] text-[rgb(var(--foreground))] shadow-sm"
+                      : "text-[rgb(var(--muted))] hover:text-[rgb(var(--foreground))]",
+                  ].join(" ")}
+                >
+                  {getTypeLabel(type, t)}
+                  <span className="rounded-full bg-[rgb(var(--surface-soft))] px-1.5 py-0.5 text-[10px] font-semibold text-[rgb(var(--muted))]">
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
-          <div className="luca-panel">
-            {loading ? (
-              <div className="space-y-px p-2">
-                {[1, 2, 3, 4, 5].map((item) => (
-                  <div key={item} className="h-16 animate-pulse rounded-lg bg-[rgb(var(--surface-soft))]" />
-                ))}
-              </div>
-            ) : visibleRoots.length === 0 ? (
-              <div className="flex flex-col items-center px-6 py-16 text-center">
-                <TagIcon size={28} className="text-[rgb(var(--muted-soft))]" />
-                <p className="mt-3 text-sm text-[rgb(var(--muted))]">
-                  {search ? t("categories.noResults") : t("categories.empty")}
-                </p>
-                {!search && (
-                  <button
-                    onClick={() => resetForm(activeType)}
-                    className="mt-4 flex h-9 items-center gap-2 rounded-lg border border-[rgb(var(--border))] px-3 text-sm font-medium text-[rgb(var(--foreground))] transition hover:bg-[rgb(var(--surface-soft))]"
-                  >
-                    <PlusIcon size={14} weight="bold" />
-                    {t("categories.add")}
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="divide-y divide-[rgb(var(--border-soft))]">
-                {visibleRoots.map((category) => {
-                  const children = (childrenByParent.get(category.id) ?? []).filter((child) =>
-                    categoryMatches(child, search)
-                  );
-                  const shouldShowChildren = expanded.has(category.id) || !!search;
-                  return (
-                    <div key={category.id}>
-                      <CategoryRow
-                        category={category}
-                        childCount={(childrenByParent.get(category.id) ?? []).length}
-                        isExpanded={shouldShowChildren}
-                        isEditing={editingId === category.id}
-                        deleteConfirmId={deleteConfirmId}
-                        onToggle={() => toggleExpanded(category.id)}
-                        onCreateChild={() => {
-                          setExpanded((prev) => new Set(prev).add(category.id));
-                          resetForm(activeType, category.id);
-                        }}
-                        onEdit={() => editCategory(category)}
-                        onDeleteRequest={() => setDeleteConfirmId(category.id)}
-                        onDeleteConfirm={() => deleteCategory(category.id)}
-                        onDeleteCancel={() => setDeleteConfirmId(null)}
-                        t={t}
-                        copy={copy}
-                      />
-                      {shouldShowChildren && children.length > 0 && (
-                        <div className="bg-[rgb(var(--surface-soft))] py-1 pl-12 pr-2">
-                          {children.map((child) => (
-                            <CategoryRow
-                              key={child.id}
-                              category={child}
-                              childCount={0}
-                              nested
-                              isExpanded={false}
-                              isEditing={editingId === child.id}
-                              deleteConfirmId={deleteConfirmId}
-                              onToggle={() => undefined}
-                              onCreateChild={() => undefined}
-                              onEdit={() => editCategory(child)}
-                              onDeleteRequest={() => setDeleteConfirmId(child.id)}
-                              onDeleteConfirm={() => deleteCategory(child.id)}
-                              onDeleteCancel={() => setDeleteConfirmId(null)}
-                              t={t}
-                              copy={copy}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </section>
-
-        <aside className="luca-panel h-fit xl:sticky xl:top-6">
-          <div className="border-b border-[rgb(var(--border-soft))] px-4 py-3">
-            <div className="text-sm font-semibold">
-              {editingId ? copy.edit : form.parentId ? copy.createSub : copy.createRoot}
-            </div>
-            <div className="mt-0.5 text-xs text-[rgb(var(--muted))]">
-              {getTypeLabel(form.type, t)}
-            </div>
-          </div>
-
-          <div className="space-y-4 p-4">
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold text-[rgb(var(--muted))]">
-                {t("categories.name")}
-              </label>
-              <input
-                autoFocus
-                value={form.name}
-                onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
-                placeholder={locale === "ru" ? "Например, продукты" : "For example, groceries"}
-                className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
-              />
-            </div>
-
-            {!editingId && (
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold text-[rgb(var(--muted))]">
-                  {t("transactions.filterAll")}
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {(["EXPENSE", "INCOME"] as const).map((type) => (
-                    <button
-                      key={type}
-                      onClick={() => {
-                        setActiveType(type);
-                        setForm((prev) => ({ ...prev, type, parentId: "", color: type === "EXPENSE" ? "#dc2626" : "#16a34a" }));
-                      }}
-                      className={[
-                        "h-9 rounded-lg border text-sm font-medium transition",
-                        form.type === type
-                          ? "border-[rgb(var(--foreground))] bg-[rgb(var(--foreground))] text-[rgb(var(--background))]"
-                          : "border-[rgb(var(--border))] text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))]",
-                      ].join(" ")}
-                    >
-                      {getTypeLabel(type, t)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold text-[rgb(var(--muted))]">
-                {t("categories.parent")}
-              </label>
-              <select
-                value={form.parentId}
-                onChange={(event) => setForm((prev) => ({ ...prev, parentId: event.target.value }))}
-                className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+          <div className="relative min-w-0 flex-1">
+            <MagnifyingGlassIcon
+              size={15}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-[rgb(var(--muted))]"
+            />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t("categories.search")}
+              className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] pl-9 pr-9 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[rgb(var(--muted))] hover:text-[rgb(var(--foreground))]"
               >
-                <option value="">{copy.root}</option>
-                {parentOptions.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.icon ? `${category.icon} ` : ""}{category.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+                <XIcon size={13} />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
 
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold text-[rgb(var(--muted))]">
-                {t("categories.icon")}
-              </label>
-              <div className="grid grid-cols-10 gap-1.5">
-                {ICON_PRESETS.map((icon) => (
-                  <button
-                    key={icon}
-                    onClick={() => setForm((prev) => ({ ...prev, icon }))}
-                    className={[
-                      "flex h-8 items-center justify-center rounded-lg border text-base transition hover:bg-[rgb(var(--surface-soft))]",
-                      form.icon === icon
-                        ? "border-[rgb(var(--foreground))] bg-[rgb(var(--surface-soft))]"
-                        : "border-[rgb(var(--border-soft))]",
-                    ].join(" ")}
-                  >
-                    {icon}
-                  </button>
-                ))}
-              </div>
-              <input
-                value={form.icon}
-                onChange={(event) => setForm((prev) => ({ ...prev, icon: event.target.value }))}
-                placeholder={locale === "ru" ? "Или свой символ" : "Or custom symbol"}
-                className="mt-2 h-9 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
-              />
+      {/* Main layout: list + desktop side panel */}
+      <div className="xl:grid xl:grid-cols-[minmax(0,1fr)_360px] xl:gap-4">
+        {/* Category list */}
+        <div className="luca-panel">
+          {loading ? (
+            <div className="space-y-px p-2">
+              {[1, 2, 3, 4, 5].map((i) => (
+                <div key={i} className="h-16 animate-pulse rounded-lg bg-[rgb(var(--surface-soft))]" />
+              ))}
             </div>
-
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold text-[rgb(var(--muted))]">
-                {t("categories.color")}
-              </label>
-              <div className="flex flex-wrap gap-1.5">
-                {COLOR_PRESETS.map((color) => (
-                  <button
-                    key={color}
-                    onClick={() => setForm((prev) => ({ ...prev, color }))}
-                    className="flex h-7 w-7 items-center justify-center rounded-lg"
-                    style={{ background: color }}
-                  >
-                    {form.color === color && <CheckIcon size={11} weight="bold" className="text-white drop-shadow" />}
-                  </button>
-                ))}
-                <input
-                  type="color"
-                  value={form.color}
-                  onChange={(event) => setForm((prev) => ({ ...prev, color: event.target.value }))}
-                  className="h-7 w-9 cursor-pointer rounded-lg border border-[rgb(var(--border))] bg-transparent"
-                />
-              </div>
+          ) : visibleRoots.length === 0 ? (
+            <div className="flex flex-col items-center px-6 py-16 text-center">
+              <TagIcon size={28} className="text-[rgb(var(--muted-soft))]" />
+              <p className="mt-3 text-sm text-[rgb(var(--muted))]">
+                {search ? t("categories.noResults") : t("categories.empty")}
+              </p>
+              {!search && (
+                <button
+                  onClick={() => openCreate(activeType)}
+                  className="mt-4 flex h-9 items-center gap-2 rounded-lg border border-[rgb(var(--border))] px-3 text-sm font-medium text-[rgb(var(--foreground))] transition hover:bg-[rgb(var(--surface-soft))]"
+                >
+                  <PlusIcon size={14} weight="bold" />
+                  {t("categories.add")}
+                </button>
+              )}
             </div>
-
-            <div className="rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] p-3">
-              <div className="mb-2 text-xs font-semibold text-[rgb(var(--muted))]">
-                {t("categories.previewLabel")}
-              </div>
-              <div className="flex items-center gap-3">
-                <CategoryMark category={{ icon: form.icon, color: form.color }} />
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold">{form.name || t("categories.name")}</div>
-                  <div className="text-xs text-[rgb(var(--muted))]">
-                    {form.parentId ? copy.createSub : copy.root}
+          ) : (
+            <div className="divide-y divide-[rgb(var(--border-soft))]">
+              {visibleRoots.map((category) => {
+                const children = (childrenByParent.get(category.id) ?? []).filter((ch) =>
+                  categoryMatches(ch, search)
+                );
+                const shouldShowChildren = expanded.has(category.id) || !!search;
+                return (
+                  <div key={category.id}>
+                    <CategoryRow
+                      category={category}
+                      childCount={(childrenByParent.get(category.id) ?? []).length}
+                      isExpanded={shouldShowChildren}
+                      isEditing={editingId === category.id && !formOpen}
+                      deleteConfirmId={deleteConfirmId}
+                      onToggle={() => toggleExpanded(category.id)}
+                      onCreateChild={() => {
+                        setExpanded((prev) => new Set(prev).add(category.id));
+                        openCreate(activeType, category.id);
+                      }}
+                      onEdit={() => editCategory(category)}
+                      onDeleteRequest={() => setDeleteConfirmId(category.id)}
+                      onDeleteConfirm={() => deleteCategory(category.id)}
+                      onDeleteCancel={() => setDeleteConfirmId(null)}
+                      t={t}
+                      locale={locale}
+                    />
+                    {shouldShowChildren && children.length > 0 && (
+                      <div className="bg-[rgb(var(--surface-soft))] py-1 pl-12 pr-2">
+                        {children.map((child) => (
+                          <CategoryRow
+                            key={child.id}
+                            category={child}
+                            childCount={0}
+                            nested
+                            isExpanded={false}
+                            isEditing={editingId === child.id && !formOpen}
+                            deleteConfirmId={deleteConfirmId}
+                            onToggle={() => undefined}
+                            onCreateChild={() => undefined}
+                            onEdit={() => editCategory(child)}
+                            onDeleteRequest={() => setDeleteConfirmId(child.id)}
+                            onDeleteConfirm={() => deleteCategory(child.id)}
+                            onDeleteCancel={() => setDeleteConfirmId(null)}
+                            t={t}
+                            locale={locale}
+                          />
+                        ))}
+                      </div>
+                    )}
                   </div>
-                </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Desktop side panel (xl+) */}
+        <aside className="hidden xl:block">
+          <div className="luca-panel h-fit sticky top-6">
+            <div className="border-b border-[rgb(var(--border-soft))] px-4 py-3">
+              <div className="text-sm font-semibold">{formTitle}</div>
+              <div className="mt-0.5 text-xs text-[rgb(var(--muted))]">
+                {getTypeLabel(form.type, t)}
               </div>
             </div>
-
-            <div className="flex gap-2">
-              <button
-                onClick={saveCategory}
-                disabled={saving || !form.name.trim()}
-                className="h-10 flex-1 rounded-lg bg-[rgb(var(--foreground))] text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85 disabled:opacity-40"
-              >
-                {saving ? t("common.loading") : t("common.save")}
-              </button>
-              <button
-                onClick={() => resetForm(activeType)}
-                className="h-10 rounded-lg border border-[rgb(var(--border))] px-4 text-sm font-medium text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
-              >
-                {copy.clear}
-              </button>
+            <div className="p-4">
+              <CategoryFormContent
+                form={form}
+                editingId={editingId}
+                parentOptions={parentOptions}
+                saving={saving}
+                locale={locale}
+                onChange={(patch) => setForm((f) => ({ ...f, ...patch }))}
+                onSave={saveCategory}
+                onClear={() => { resetForm(activeType); setFormOpen(false); }}
+                t={t}
+              />
             </div>
           </div>
         </aside>
       </div>
+
+      {/* Mobile modal (below xl) */}
+      <Modal
+        open={formOpen}
+        onClose={() => { setFormOpen(false); resetForm(activeType); }}
+        title={formTitle}
+        maxWidth="sm"
+      >
+        <CategoryFormContent
+          form={form}
+          editingId={editingId}
+          parentOptions={parentOptions}
+          saving={saving}
+          locale={locale}
+          onChange={(patch) => setForm((f) => ({ ...f, ...patch }))}
+          onSave={saveCategory}
+          onClear={() => { setFormOpen(false); resetForm(activeType); }}
+          t={t}
+        />
+      </Modal>
     </div>
   );
 }
@@ -546,7 +629,7 @@ function CategoryRow({
   onDeleteConfirm,
   onDeleteCancel,
   t,
-  copy,
+  locale,
 }: {
   category: Category;
   childCount: number;
@@ -561,9 +644,10 @@ function CategoryRow({
   onDeleteConfirm: () => void;
   onDeleteCancel: () => void;
   t: (key: string) => string;
-  copy: { defaultBadge: string };
+  locale: string;
 }) {
   const confirmingDelete = deleteConfirmId === category.id;
+  const defaultBadge = locale === "ru" ? "системная" : "default";
 
   return (
     <div
@@ -597,12 +681,16 @@ function CategoryRow({
           </span>
           {category.isDefault && (
             <span className="shrink-0 rounded-full bg-[rgb(var(--surface-soft))] px-2 py-0.5 text-[10px] font-semibold text-[rgb(var(--muted))]">
-              {copy.defaultBadge}
+              {defaultBadge}
             </span>
           )}
         </div>
         <div className="text-xs text-[rgb(var(--muted))]">
-          {nested ? t("categories.sub") : childCount > 0 ? `${childCount} ${t("categories.subcategories")}` : t("categories.noParent")}
+          {nested
+            ? t("categories.sub")
+            : childCount > 0
+              ? `${childCount} ${t("categories.subcategories")}`
+              : t("categories.noParent")}
         </div>
       </div>
 

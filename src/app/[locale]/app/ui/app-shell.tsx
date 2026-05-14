@@ -3,22 +3,23 @@
 import { apiFetch } from "@/shared/api/client";
 import { useI18n } from "@/shared/i18n/i18n-provider";
 import { AppIcons } from "@/shared/icons/app-icons";
-import { createSupabaseBrowserClient } from "@/shared/lib/supabase/client";
-import { LucaProvider, useLuca } from "@/shared/providers/luca-provider";
 import type { LucaFeatureFlag, LucaWorkspace } from "@/shared/providers/luca-provider";
+import { LucaProvider, useLuca } from "@/shared/providers/luca-provider";
 import {
   ArrowLineLeftIcon,
   ArrowLineRightIcon,
   CheckIcon,
-  DotsThreeVerticalIcon,
+  GlobeIcon,
   ListIcon,
+  MoonIcon,
   PlusIcon,
+  SunIcon,
   XIcon,
 } from "@phosphor-icons/react/dist/ssr";
 import { useTheme } from "next-themes";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { OnboardingCurrencyDialog } from "./onboarding-currency-dialog";
 
 type NavItem = {
@@ -77,6 +78,11 @@ const navGroups: NavGroup[] = [
 const nav = navGroups.flatMap((group) => group.items);
 
 const SIDEBAR_COLLAPSED_KEY = "luca-sidebar-collapsed";
+const SIDEBAR_WIDTH_KEY = "luca-sidebar-width";
+const DEFAULT_SIDEBAR_WIDTH = 240;
+const MIN_SIDEBAR_WIDTH = 168;
+const MAX_SIDEBAR_WIDTH = 400;
+const COLLAPSE_THRESHOLD = 140;
 
 function usePageTitle(locale: string): string {
   const pathname = usePathname();
@@ -119,12 +125,12 @@ function SidebarNav({
       <div className="space-y-3">
         {navGroups.map((group) => (
           <div key={group.key}>
-            {!collapsed && (
+            {!collapsed && group.key != 'primary' && (
               <div className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-[rgb(var(--muted-soft))]">
                 {groupLabel(group.key)}
               </div>
             )}
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               {group.items.filter((item) => !item.feature || isFeatureEnabled(item.feature)).map((item) => {
                 const Icon = item.icon;
                 const href = `/${locale}${item.href}`;
@@ -151,7 +157,7 @@ function SidebarNav({
                   >
                     <Icon size={16} weight="regular" className="shrink-0" />
                     {!collapsed && (
-                      <span className="text-sm">{t(item.labelKey)}</span>
+                      <span className="truncate text-sm">{t(item.labelKey)}</span>
                     )}
                   </Link>
                 );
@@ -278,7 +284,7 @@ function WorkspaceSwitcherPopup({
   onSwitch: (id: string) => void;
   onClose: () => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { workspaces, workspace, billing } = useLuca();
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
@@ -308,7 +314,7 @@ function WorkspaceSwitcherPopup({
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} />
-      <div className="absolute bottom-full left-0 right-0 z-50 mb-1 mx-0 overflow-hidden rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-raised))] shadow-xl">
+      <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-raised))] shadow-xl">
         <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-[rgb(var(--muted-soft))]">
           {t("workspace.switcher")}
         </div>
@@ -319,20 +325,21 @@ function WorkspaceSwitcherPopup({
               onClick={() => { onSwitch(ws.id); onClose(); }}
               className="flex w-full items-center gap-2.5 px-3 py-2 text-sm transition hover:bg-[rgb(var(--surface-soft))]"
             >
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[rgb(var(--accent))] text-[10px] font-bold text-white">
+              <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[rgb(var(--accent))] text-[9px] font-bold text-white">
                 {ws.name[0]?.toUpperCase()}
               </div>
               <div className="min-w-0 flex-1 text-left">
                 <div className="truncate text-sm font-medium text-[rgb(var(--foreground))]">
                   {ws.name}
                 </div>
-                <div className="text-[11px] text-[rgb(var(--muted))]">
-                  {t(`workspace.${ws.type.toLowerCase()}`) || ws.type.toLowerCase()}
-                  {" · "}{ws.baseCurrency}
+                <div className="text-[10px] text-[rgb(var(--muted))]">
+                  {locale === "ru"
+                    ? ws.type === "PERSONAL" ? "Личный" : ws.type === "BUSINESS" ? "Бизнес" : ws.type
+                    : ws.type.toLowerCase()}{" · "}{ws.baseCurrency}
                 </div>
               </div>
               {ws.id === workspace?.id && (
-                <CheckIcon size={13} weight="bold" className="shrink-0 text-[rgb(var(--accent))]" />
+                <CheckIcon size={12} weight="bold" className="shrink-0 text-[rgb(var(--accent))]" />
               )}
             </button>
           ))}
@@ -371,10 +378,12 @@ function WorkspaceSwitcherPopup({
             <button
               onClick={() => canCreateWorkspace && setShowCreate(true)}
               disabled={!canCreateWorkspace}
-              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
+              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))] disabled:opacity-50"
             >
               <PlusIcon size={13} weight="bold" />
-              {canCreateWorkspace ? t("workspace.new") : `${workspaces.length}/${workspaceLimit} ${t("workspace.switcher")}`}
+              {canCreateWorkspace
+                ? t("workspace.new")
+                : `${workspaces.length}/${workspaceLimit} ${locale === "ru" ? "воркспейсов" : "workspaces"}`}
             </button>
           )}
         </div>
@@ -383,85 +392,70 @@ function WorkspaceSwitcherPopup({
   );
 }
 
-/* ── Settings menu popup ────────────────────────────── */
-function SettingsMenuPopup({
-  locale,
-  onClose,
+/* ── Sidebar header (workspace switcher area) ───────── */
+function SidebarHeader({
+  collapsed,
+  onToggle,
 }: {
-  locale: string;
-  onClose: () => void;
+  collapsed: boolean;
+  onToggle: () => void;
 }) {
-  const { t, locale: currentLocale } = useI18n();
-  const { resolvedTheme, setTheme } = useTheme();
-  const router = useRouter();
-  const pathname = usePathname();
-  const isDark = resolvedTheme === "dark";
-
-  function switchLocale(next: string) {
-    const segments = pathname.split("/");
-    segments[1] = next;
-    router.push(segments.join("/"));
-    onClose();
-  }
-
-  async function signOut() {
-    await createSupabaseBrowserClient().auth.signOut();
-    router.push(`/${locale}/login`);
-    onClose();
-  }
-
-  const menuItems = [
-    {
-      icon: isDark ? AppIcons.sun : AppIcons.moon,
-      label: isDark ? t("common.lightMode") : t("common.darkMode"),
-      onClick: () => { setTheme(isDark ? "light" : "dark"); onClose(); },
-    },
-    {
-      icon: AppIcons.globe,
-      label: currentLocale === "en" ? "Русский" : "English",
-      onClick: () => switchLocale(currentLocale === "en" ? "ru" : "en"),
-    },
-  ];
+  const { workspace, setWorkspaceId } = useLuca();
+  const [open, setOpen] = useState(false);
+  const initial = workspace?.name?.[0]?.toUpperCase() ?? "?";
 
   return (
-    <>
-      <div className="fixed inset-0 z-40" onClick={onClose} />
-      <div className="absolute bottom-full right-0 z-50 mb-1 w-52 overflow-hidden rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-raised))] shadow-xl">
-        <div className="py-1">
-          {menuItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.label}
-                onClick={item.onClick}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-[rgb(var(--foreground))] transition hover:bg-[rgb(var(--surface-soft))]"
-              >
-                <Icon size={14} weight="regular" className="shrink-0 text-[rgb(var(--muted))]" />
-                {item.label}
-              </button>
-            );
-          })}
-        </div>
-        <div className="border-t border-[rgb(var(--border-soft))] py-1">
+    <div
+      className={[
+        "relative flex h-14 shrink-0 items-center border-b border-[rgb(var(--border-soft))]",
+        collapsed ? "justify-center px-0" : "gap-1 px-2",
+      ].join(" ")}
+    >
+      {collapsed ? (
+        <>
           <button
-            onClick={() => { router.push(`/${locale}/app/settings`); onClose(); }}
-            className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-[rgb(var(--foreground))] transition hover:bg-[rgb(var(--surface-soft))]"
+            onClick={() => setOpen((v) => !v)}
+            title={workspace?.name}
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-[rgb(var(--accent))] text-[11px] font-bold text-white transition hover:opacity-85"
           >
-            <AppIcons.gear size={14} weight="regular" className="shrink-0 text-[rgb(var(--muted))]" />
-            {t("navigation.settings")}
+            {initial}
           </button>
-        </div>
-        <div className="border-t border-[rgb(var(--border-soft))] py-1">
+          {open && (
+            <WorkspaceSwitcherPopup
+              onSwitch={(id) => { setWorkspaceId(id); setOpen(false); }}
+              onClose={() => setOpen(false)}
+            />
+          )}
+        </>
+      ) : (
+        <>
           <button
-            onClick={signOut}
-            className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-[rgb(var(--negative))] transition hover:bg-[rgb(var(--surface-soft))]"
+            onClick={() => setOpen((v) => !v)}
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 transition hover:bg-[rgb(var(--surface-soft))]"
           >
-            <AppIcons.signOut size={14} weight="regular" className="shrink-0" />
-            {t("common.logout")}
+            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[rgb(var(--accent))] text-[10px] font-bold text-white">
+              {initial}
+            </div>
+            <span className="truncate text-sm font-semibold text-[rgb(var(--foreground))]">
+              {workspace?.name ?? "LUCA"}
+            </span>
           </button>
-        </div>
-      </div>
-    </>
+          {open && (
+            <WorkspaceSwitcherPopup
+              onSwitch={(id) => { setWorkspaceId(id); setOpen(false); }}
+              onClose={() => setOpen(false)}
+            />
+          )}
+          <button
+            onClick={onToggle}
+            title="Collapse sidebar"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
+          >
+            <ArrowLineLeftIcon size={13} weight="bold" />
+          </button>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -473,71 +467,83 @@ function SidebarFooter({
   locale: string;
   collapsed: boolean;
 }) {
-  const { workspace, setWorkspaceId } = useLuca();
-  const [email, setEmail] = useState<string | null>(null);
-  const [popup, setPopup] = useState<"none" | "workspace" | "settings">("none");
-  const footerRef = useRef<HTMLDivElement>(null);
+  const { t, locale: currentLocale } = useI18n();
+  const { resolvedTheme, setTheme } = useTheme();
+  const router = useRouter();
+  const pathname = usePathname();
+  const isDark = resolvedTheme === "dark";
+  const isSettings = pathname.startsWith(`/${locale}/app/settings`);
 
-  useEffect(() => {
-    createSupabaseBrowserClient()
-      .auth.getUser()
-      .then(({ data }) => setEmail(data.user?.email ?? null));
-  }, []);
+  function switchLocale() {
+    const next = currentLocale === "en" ? "ru" : "en";
+    const segments = pathname.split("/");
+    segments[1] = next;
+    router.push(segments.join("/"));
+  }
 
-  const initial = workspace?.name?.[0]?.toUpperCase() ?? "?";
-
-  function closePopup() {
-    setPopup("none");
+  if (collapsed) {
+    return (
+      <div className="shrink-0 border-t border-[rgb(var(--border-soft))] px-2 py-3 space-y-1">
+        <button
+          onClick={() => setTheme(isDark ? "light" : "dark")}
+          className="flex h-9 w-9 mx-auto items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
+          title={isDark ? t("common.lightMode") : t("common.darkMode")}
+        >
+          {isDark ? <SunIcon size={15} weight="regular" /> : <MoonIcon size={15} weight="regular" />}
+        </button>
+        <button
+          onClick={switchLocale}
+          className="flex h-9 w-9 mx-auto items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
+          title={currentLocale === "en" ? "Switch to Russian" : "Switch to English"}
+        >
+          <GlobeIcon size={15} weight="regular" />
+        </button>
+        <Link
+          href={`/${locale}/app/settings`}
+          className={[
+            "flex h-9 w-9 mx-auto items-center justify-center rounded-lg transition",
+            isSettings
+              ? "bg-[rgb(var(--surface-soft))] text-[rgb(var(--foreground))]"
+              : "text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]",
+          ].join(" ")}
+          title={t("navigation.settings")}
+        >
+          <AppIcons.settings size={15} weight="regular" />
+        </Link>
+      </div>
+    );
   }
 
   return (
-    <div
-      ref={footerRef}
-      className="relative shrink-0 border-t border-[rgb(var(--border-soft))] px-2 py-3"
-    >
-      {popup === "workspace" && !collapsed && (
-        <WorkspaceSwitcherPopup
-          onSwitch={setWorkspaceId}
-          onClose={closePopup}
-        />
-      )}
-      {popup === "settings" && (
-        <SettingsMenuPopup locale={locale} onClose={closePopup} />
-      )}
-
-      <div className={["flex items-center", collapsed ? "justify-center" : "gap-1"].join(" ")}>
+    <div className="shrink-0 border-t border-[rgb(var(--border-soft))] px-2 py-3">
+      <div className="flex items-center gap-1">
         <button
-          onClick={() => setPopup(popup === "workspace" ? "none" : "workspace")}
-          title={workspace?.name}
+          onClick={() => setTheme(isDark ? "light" : "dark")}
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
+          title={isDark ? t("common.lightMode") : t("common.darkMode")}
+        >
+          {isDark ? <SunIcon size={15} weight="regular" /> : <MoonIcon size={15} weight="regular" />}
+        </button>
+        <button
+          onClick={switchLocale}
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
+          title={currentLocale === "en" ? "Русский" : "English"}
+        >
+          <GlobeIcon size={15} weight="regular" />
+        </button>
+        <div className="flex-1" />
+        <Link
+          href={`/${locale}/app/settings`}
           className={[
-            "flex items-center gap-2 rounded-lg py-2 transition hover:bg-[rgb(var(--surface-soft))]",
-            collapsed ? "justify-center px-2" : "min-w-0 flex-1 px-2",
+            "flex h-8 items-center gap-1.5 rounded-lg px-3 text-sm transition",
+            isSettings
+              ? "bg-[rgb(var(--surface-soft))] font-medium text-[rgb(var(--foreground))]"
+              : "text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]",
           ].join(" ")}
         >
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[rgb(var(--accent))] text-[11px] font-bold text-white">
-            {initial}
-          </div>
-          {!collapsed && (
-            <div className="min-w-0 flex-1 text-left">
-              <div className="truncate text-sm font-medium leading-snug text-[rgb(var(--foreground))]">
-                {workspace?.name ?? "…"}
-              </div>
-              <div className="truncate text-[11px] leading-snug text-[rgb(var(--muted))]">
-                {email ?? "…"}
-              </div>
-            </div>
-          )}
-        </button>
-
-        {!collapsed && (
-          <button
-            onClick={() => setPopup(popup === "settings" ? "none" : "settings")}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
-            title="Menu"
-          >
-            <DotsThreeVerticalIcon size={16} weight="bold" />
-          </button>
-        )}
+          <AppIcons.settings size={14} weight="regular" className="shrink-0" />
+          <span>{t("navigation.settings")}</span>
+        </Link>
       </div>
     </div>
   );
@@ -547,46 +553,40 @@ function SidebarFooter({
 function Sidebar({
   locale,
   collapsed,
+  sidebarWidth,
   onToggle,
+  onDragStart,
 }: {
   locale: string;
   collapsed: boolean;
+  sidebarWidth: number;
   onToggle: () => void;
+  onDragStart: (e: React.MouseEvent) => void;
 }) {
   return (
     <aside
+      style={collapsed ? undefined : { width: sidebarWidth }}
       className={[
-        "fixed inset-y-0 left-0 z-30 hidden flex-col border-r border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-raised))] transition-all duration-200 lg:flex",
-        collapsed ? "w-16" : "w-[var(--sidebar-width)]",
+        "fixed inset-y-0 left-0 z-30 hidden flex-col border-r border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-raised))] lg:flex",
+        collapsed ? "w-16" : "",
       ].join(" ")}
     >
-      {/* Header */}
-      <div
-        className={[
-          "flex h-14 shrink-0 items-center border-b border-[rgb(var(--border-soft))]",
-          collapsed ? "justify-center px-0" : "justify-between px-4",
-        ].join(" ")}
-      >
-        {!collapsed && (
-          <Link
-            href={`/${locale}/app`}
-            className="flex items-center gap-2 text-[15px] font-semibold tracking-tight text-[rgb(var(--foreground))]"
+      {/* Collapsed expand button at top */}
+      {collapsed && (
+        <div className="flex h-14 shrink-0 items-center justify-center border-b border-[rgb(var(--border-soft))]">
+          <button
+            onClick={onToggle}
+            title="Expand sidebar"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
           >
-            LUCA
-          </Link>
-        )}
-        <button
-          onClick={onToggle}
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="flex h-7 w-7 items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
-        >
-          {collapsed ? (
-            <ArrowLineRightIcon size={14} weight="bold" />
-          ) : (
-            <ArrowLineLeftIcon size={14} weight="bold" />
-          )}
-        </button>
-      </div>
+            <ArrowLineRightIcon size={13} weight="bold" />
+          </button>
+        </div>
+      )}
+
+      {!collapsed && (
+        <SidebarHeader collapsed={false} onToggle={onToggle} />
+      )}
 
       <SidebarNav locale={locale} collapsed={collapsed} />
 
@@ -599,6 +599,14 @@ function Sidebar({
       )}
 
       <SidebarFooter locale={locale} collapsed={collapsed} />
+
+      {/* Drag handle */}
+      {!collapsed && (
+        <div
+          onMouseDown={onDragStart}
+          className="absolute inset-y-0 right-0 w-1 cursor-col-resize opacity-0 hover:opacity-100 hover:bg-[rgb(var(--accent))] transition-opacity"
+        />
+      )}
     </aside>
   );
 }
@@ -613,6 +621,10 @@ function MobileSidebar({
   open: boolean;
   onClose: () => void;
 }) {
+  const { workspace, setWorkspaceId } = useLuca();
+  const initial = workspace?.name?.[0]?.toUpperCase() ?? "?";
+  const [wsOpen, setWsOpen] = useState(false);
+
   return (
     <>
       <div
@@ -624,21 +636,31 @@ function MobileSidebar({
       />
       <aside
         className={[
-          "fixed inset-y-0 left-0 z-50 flex w-[var(--sidebar-width)] flex-col border-r border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-raised))] shadow-2xl transition-transform duration-300 ease-out lg:hidden",
+          "fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-raised))] shadow-2xl transition-transform duration-300 ease-out lg:hidden",
           open ? "translate-x-0" : "-translate-x-full",
         ].join(" ")}
       >
-        <div className="flex h-[var(--header-height)] shrink-0 items-center justify-between border-b border-[rgb(var(--border-soft))] px-4">
-          <Link
-            href={`/${locale}/app`}
-            onClick={onClose}
-            className="text-[15px] font-semibold tracking-tight text-[rgb(var(--foreground))]"
+        <div className="relative flex h-[var(--header-height)] shrink-0 items-center gap-2 border-b border-[rgb(var(--border-soft))] px-3">
+          <button
+            onClick={() => setWsOpen((v) => !v)}
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-1 transition hover:bg-[rgb(var(--surface-soft))]"
           >
-            LUCA
-          </Link>
+            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[rgb(var(--accent))] text-[10px] font-bold text-white">
+              {initial}
+            </div>
+            <span className="truncate text-sm font-semibold text-[rgb(var(--foreground))]">
+              {workspace?.name ?? "LUCA"}
+            </span>
+          </button>
+          {wsOpen && (
+            <WorkspaceSwitcherPopup
+              onSwitch={(id) => { setWorkspaceId(id); setWsOpen(false); }}
+              onClose={() => setWsOpen(false)}
+            />
+          )}
           <button
             onClick={onClose}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))]"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))]"
           >
             <XIcon size={15} />
           </button>
@@ -681,14 +703,24 @@ export function AppShell({
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
+  const isDragging = useRef(false);
 
-  // Load persisted collapsed state after hydration
   useEffect(() => {
-    const saved =
+    const savedCollapsed =
       typeof localStorage !== "undefined"
         ? localStorage.getItem(SIDEBAR_COLLAPSED_KEY)
         : null;
-    if (saved === "true") setCollapsed(true);
+    if (savedCollapsed === "true") setCollapsed(true);
+
+    const savedWidth =
+      typeof localStorage !== "undefined"
+        ? localStorage.getItem(SIDEBAR_WIDTH_KEY)
+        : null;
+    if (savedWidth) {
+      const w = Number(savedWidth);
+      if (w >= MIN_SIDEBAR_WIDTH && w <= MAX_SIDEBAR_WIDTH) setSidebarWidth(w);
+    }
   }, []);
 
   function toggleCollapsed() {
@@ -699,21 +731,65 @@ export function AppShell({
     }
   }
 
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDragging.current = true;
+
+    function onMouseMove(ev: MouseEvent) {
+      if (!isDragging.current) return;
+      const newWidth = ev.clientX;
+      if (newWidth < COLLAPSE_THRESHOLD) {
+        setCollapsed(true);
+        isDragging.current = false;
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+        if (typeof localStorage !== "undefined") {
+          localStorage.setItem(SIDEBAR_COLLAPSED_KEY, "true");
+        }
+        return;
+      }
+      const clamped = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, newWidth));
+      setCollapsed(false);
+      setSidebarWidth(clamped);
+    }
+
+    function onMouseUp() {
+      isDragging.current = false;
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      setSidebarWidth((w) => {
+        if (typeof localStorage !== "undefined") {
+          localStorage.setItem(SIDEBAR_WIDTH_KEY, String(w));
+        }
+        return w;
+      });
+    }
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, []);
+
+  const mainPaddingLeft = collapsed ? 64 : sidebarWidth;
+
   return (
     <LucaProvider>
       <OnboardingCurrencyDialog />
       <div className="luca-app">
-        <Sidebar locale={locale} collapsed={collapsed} onToggle={toggleCollapsed} />
+        <Sidebar
+          locale={locale}
+          collapsed={collapsed}
+          sidebarWidth={sidebarWidth}
+          onToggle={toggleCollapsed}
+          onDragStart={handleDragStart}
+        />
         <MobileSidebar
           locale={locale}
           open={mobileOpen}
           onClose={() => setMobileOpen(false)}
         />
         <div
-          className={[
-            "flex flex-1 flex-col transition-all duration-200",
-            collapsed ? "lg:pl-16" : "lg:pl-[var(--sidebar-width)]",
-          ].join(" ")}
+          className="flex flex-1 flex-col lg:[padding-left:var(--sw)] lg:transition-[padding-left] lg:duration-200"
+          style={{ '--sw': `${mainPaddingLeft}px` } as React.CSSProperties}
         >
           <Header locale={locale} onMenuOpen={() => setMobileOpen(true)} />
           <main className="relative min-h-0 flex-1 overflow-y-auto px-4 py-6 lg:px-8">

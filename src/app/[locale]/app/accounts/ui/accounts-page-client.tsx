@@ -3,12 +3,16 @@
 import { apiFetch } from "@/shared/api/client";
 import { useI18n } from "@/shared/i18n/i18n-provider";
 import { useLuca } from "@/shared/providers/luca-provider";
+import { Modal } from "@/shared/ui/modal";
 import {
   ArchiveIcon,
+  BankIcon,
   CheckIcon,
+  CurrencyBtcIcon,
+  CurrencyDollarIcon,
   PencilIcon,
   PlusIcon,
-  XIcon
+  XIcon,
 } from "@phosphor-icons/react/dist/ssr";
 import { useEffect, useState } from "react";
 
@@ -34,31 +38,22 @@ type AccountForm = {
   creditLimit: string;
 };
 
-const ACCOUNT_TYPES: Account["type"][] = [
-  "CASH",
-  "CARD",
-  "BANK",
-  "WISE",
-  "PAYPAL",
-  "CRYPTO",
-  "OTHER",
-];
+const ACCOUNT_TYPES: Account["type"][] = ["CASH", "CARD", "BANK", "WISE", "PAYPAL", "CRYPTO", "OTHER"];
 
-const ACCOUNT_TYPE_LABELS: Record<Account["type"], string> = {
-  CASH: "💵 Cash",
-  CARD: "💳 Card",
-  BANK: "🏦 Bank",
-  WISE: "🌍 Wise",
-  PAYPAL: "🅿️ PayPal",
-  CRYPTO: "₿ Crypto",
-  OTHER: "🪙 Other",
+const ACCOUNT_TYPE_META: Record<Account["type"], { label: string; emoji: string }> = {
+  CASH: { label: "Cash", emoji: "💵" },
+  CARD: { label: "Card", emoji: "💳" },
+  BANK: { label: "Bank", emoji: "🏦" },
+  WISE: { label: "Wise", emoji: "🌍" },
+  PAYPAL: { label: "PayPal", emoji: "🅿️" },
+  CRYPTO: { label: "Crypto", emoji: "₿" },
+  OTHER: { label: "Other", emoji: "🪙" },
 };
 
 const CURRENCIES = [
   "USD", "EUR", "RUB", "GBP", "AED", "CNY", "JPY", "TRY", "KZT", "UAH",
   "CAD", "AUD", "CHF", "INR", "BRL", "MXN", "SGD", "HKD", "PLN", "CZK",
-  "SEK", "NOK", "DKK", "HUF", "RON", "BGN", "HRK",
-  "BTC", "ETH", "USDT", "SOL", "TON",
+  "SEK", "NOK", "DKK", "HUF", "RON", "BTC", "ETH", "USDT", "SOL", "TON",
 ];
 
 const defaultForm = (currency: string): AccountForm => ({
@@ -67,330 +62,27 @@ const defaultForm = (currency: string): AccountForm => ({
   currency,
   initialBalance: "0",
   isDebt: false,
-  creditLimit: ""
+  creditLimit: "",
 });
 
-export function AccountsPageClient() {
-  const { t } = useI18n();
-  const { workspace } = useLuca();
-
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState<AccountForm>(defaultForm("USD"));
-
-  // Edit state
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<AccountForm>(defaultForm("USD"));
-
-  // Archive confirm
-  const [archiveConfirmId, setArchiveConfirmId] = useState<string | null>(null);
-
-  function loadAccounts() {
-    if (!workspace) return;
-    setLoading(true);
-    apiFetch<{ accounts: Account[] }>(`/api/accounts?workspaceId=${workspace.id}`)
-      .then((r) => setAccounts(r.accounts.filter((a) => !a.isArchived)))
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }
-
-  useEffect(() => {
-    loadAccounts();
-  }, [workspace]);
-
-  useEffect(() => {
-    if (workspace) {
-      setForm(defaultForm(workspace.baseCurrency));
-    }
-  }, [workspace]);
-
-  async function createAccount() {
-    if (!workspace || !form.name) return;
-    setSaving(true);
-    try {
-      await apiFetch<{ account: Account }>("/api/accounts", {
-        method: "POST",
-        body: JSON.stringify({
-          workspaceId: workspace.id,
-          name: form.name,
-          type: form.type,
-          currency: form.currency,
-          initialBalance: Number(form.initialBalance),
-          isDebt: form.isDebt,
-          creditLimit: form.creditLimit ? Number(form.creditLimit) : null
-        })
-      });
-      setForm(defaultForm(workspace.baseCurrency));
-      setShowForm(false);
-      loadAccounts();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function startEdit(account: Account) {
-    setEditingId(account.id);
-    setEditForm({
-      name: account.name,
-      type: account.type,
-      currency: account.currency,
-      initialBalance: account.initialBalance,
-      isDebt: account.isDebt,
-      creditLimit: account.creditLimit ?? ""
-    });
-    setArchiveConfirmId(null);
-  }
-
-  async function saveEdit(id: string) {
-    setSaving(true);
-    try {
-      await apiFetch<{ account: Account }>(`/api/accounts/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          name: editForm.name,
-          type: editForm.type,
-          currency: editForm.currency,
-          isDebt: editForm.isDebt,
-          creditLimit: editForm.creditLimit ? Number(editForm.creditLimit) : null
-        })
-      });
-      setEditingId(null);
-      loadAccounts();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function archiveAccount(id: string) {
-    try {
-      await apiFetch(`/api/accounts/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ isArchived: true })
-      });
-      setArchiveConfirmId(null);
-      setAccounts((prev) => prev.filter((a) => a.id !== id));
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  const showCreditFields = (f: AccountForm) =>
-    f.type === "CARD" || f.isDebt;
-
-  return (
-    <div className="luca-page space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">{t("accounts.title")}</h1>
-          <p className="mt-0.5 text-sm text-[rgb(var(--muted))]">{t("accounts.subtitle")}</p>
-        </div>
-        <button
-          onClick={() => {
-            setShowForm((v) => !v);
-            setEditingId(null);
-          }}
-          className="flex items-center gap-1.5 rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2 text-sm font-medium text-[rgb(var(--foreground))] transition hover:bg-[rgb(var(--surface-soft))] active:scale-[0.97]"
-        >
-          {showForm ? <XIcon size={14} weight="bold" /> : <PlusIcon size={14} weight="bold" />}
-          {t("accounts.add")}
-        </button>
-      </div>
-
-      {/* Add form */}
-      {showForm && (
-        <div className="overflow-hidden rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
-          <div className="flex items-center justify-between border-b border-[rgb(var(--border-soft))] px-5 py-4">
-            <span className="text-sm font-semibold">{t("accounts.add")}</span>
-            <button
-              onClick={() => setShowForm(false)}
-              className="flex h-6 w-6 items-center justify-center rounded-md text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))]"
-            >
-              <XIcon size={13} />
-            </button>
-          </div>
-          <div className="space-y-4 p-5">
-            <AccountFormFields
-              form={form}
-              onChange={(patch) => setForm((f) => ({ ...f, ...patch }))}
-              t={t}
-            />
-            <button
-              onClick={createAccount}
-              disabled={saving || !form.name}
-              className="h-10 w-full rounded-lg bg-[rgb(var(--foreground))] text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85 disabled:opacity-40"
-            >
-              {saving ? t("common.loading") : t("common.save")}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* List */}
-      {loading ? (
-        <div className="space-y-3">
-          {[1, 2, 3].map((i) => (
-            <div
-              key={i}
-              className="h-20 animate-pulse rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]"
-            />
-          ))}
-        </div>
-      ) : accounts.length === 0 ? (
-        <div className="flex flex-col items-center rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] py-20 text-center">
-          <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-[rgb(var(--surface-soft))]">
-            <span className="text-2xl opacity-30">🏦</span>
-          </div>
-          <p className="text-sm text-[rgb(var(--muted))]">{t("accounts.empty")}</p>
-        </div>
-      ) : (
-        <div className="overflow-hidden rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
-          {accounts.map((account, idx) => (
-            <div key={account.id}>
-              {editingId === account.id ? (
-                /* Inline edit form */
-                <div className="space-y-4 p-5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-semibold">{t("accounts.edit")}</span>
-                    <button
-                      onClick={() => setEditingId(null)}
-                      className="flex h-6 w-6 items-center justify-center rounded-md text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))]"
-                    >
-                      <XIcon size={13} />
-                    </button>
-                  </div>
-                  <AccountFormFields
-                    form={editForm}
-                    onChange={(patch) => setEditForm((f) => ({ ...f, ...patch }))}
-                    t={t}
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => saveEdit(account.id)}
-                      disabled={saving || !editForm.name}
-                      className="flex-1 rounded-lg bg-[rgb(var(--foreground))] py-2.5 text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85 disabled:opacity-40"
-                    >
-                      {saving ? t("common.loading") : t("common.save")}
-                    </button>
-                    <button
-                      onClick={() => setEditingId(null)}
-                      className="rounded-lg border border-[rgb(var(--border))] px-4 py-2.5 text-sm text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))]"
-                    >
-                      {t("common.cancel")}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                /* Normal account row */
-                <div
-                  className={[
-                    "group flex items-center gap-3 px-5 py-4 transition-colors hover:bg-[rgb(var(--surface-soft))]",
-                    idx < accounts.length - 1 ? "border-b border-[rgb(var(--border-soft))]" : ""
-                  ].join(" ")}
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-medium text-[rgb(var(--foreground))]">
-                        {account.name}
-                      </span>
-                      <span className="rounded-md bg-[rgb(var(--surface-soft))] px-1.5 py-0.5 text-[10px] font-medium text-[rgb(var(--muted))]">
-                        {ACCOUNT_TYPE_LABELS[account.type]}
-                      </span>
-                      {account.isDebt && (
-                        <span className="rounded-md bg-[rgb(var(--negative-dim))] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[rgb(var(--negative))]">
-                          {t("accounts.debtBadge")}
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-1 flex items-center gap-3 text-xs text-[rgb(var(--muted))]">
-                      <span className="tabular-nums">
-                        {t("accounts.balance")}:{" "}
-                        <span
-                          className={
-                            Number(account.currentBalance) >= 0
-                              ? "font-medium text-[rgb(var(--positive))]"
-                              : "font-medium text-[rgb(var(--negative))]"
-                          }
-                        >
-                          {account.currency}{" "}
-                          {Number(account.currentBalance).toLocaleString(undefined, {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2
-                          })}
-                        </span>
-                      </span>
-                      {account.creditLimit && (
-                        <span className="tabular-nums">
-                          {t("accounts.creditLimit")}: {account.currency}{" "}
-                          {Number(account.creditLimit).toLocaleString(undefined, {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2
-                          })}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Actions */}
-                  {archiveConfirmId === account.id ? (
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs text-[rgb(var(--muted))]">
-                        {t("accounts.archiveConfirm")}
-                      </span>
-                      <button
-                        onClick={() => archiveAccount(account.id)}
-                        className="flex h-6 w-6 items-center justify-center rounded-md bg-[rgb(var(--negative-dim))] text-[rgb(var(--negative))] transition hover:opacity-80"
-                      >
-                        <CheckIcon size={11} weight="bold" />
-                      </button>
-                      <button
-                        onClick={() => setArchiveConfirmId(null)}
-                        className="flex h-6 w-6 items-center justify-center rounded-md text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))]"
-                      >
-                        <XIcon size={11} />
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                      <button
-                        onClick={() => startEdit(account)}
-                        className="flex h-7 w-7 items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
-                        title={t("accounts.edit")}
-                      >
-                        <PencilIcon size={13} weight="bold" />
-                      </button>
-                      <button
-                        onClick={() => {
-                          setArchiveConfirmId(account.id);
-                          setEditingId(null);
-                        }}
-                        className="flex h-7 w-7 items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--negative-dim))] hover:text-[rgb(var(--negative))]"
-                        title={t("accounts.archiveConfirm")}
-                      >
-                        <ArchiveIcon size={13} weight="bold" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+function fmt(balance: string | number, currency: string) {
+  const n = Number(balance);
+  return `${currency} ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+/* ── Account icon ─────────────────────────────────── */
+function AccountIcon({ type, isDebt }: { type: Account["type"]; isDebt: boolean }) {
+  if (isDebt) return <CurrencyDollarIcon size={18} weight="bold" className="text-[rgb(var(--negative))]" />;
+  if (type === "CRYPTO") return <CurrencyBtcIcon size={18} weight="bold" />;
+  if (type === "BANK" || type === "WISE") return <BankIcon size={18} weight="bold" />;
+  return <span className="text-base leading-none">{ACCOUNT_TYPE_META[type].emoji}</span>;
+}
+
+/* ── Account form fields ─────────────────────────── */
 function AccountFormFields({
   form,
   onChange,
-  t
+  t,
 }: {
   form: AccountForm;
   onChange: (patch: Partial<AccountForm>) => void;
@@ -399,48 +91,41 @@ function AccountFormFields({
   const showCreditFields = form.type === "CARD" || form.isDebt;
 
   return (
-    <>
+    <div className="space-y-4">
       <div>
-        <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
-          {t("accounts.name")}
-        </label>
+        <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">{t("accounts.name")}</label>
         <input
+          autoFocus
           value={form.name}
           onChange={(e) => onChange({ name: e.target.value })}
           placeholder="My Bank Account"
-          className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))] focus:ring-2 focus:ring-[rgb(var(--accent)/0.12)]"
+          className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
         />
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
-            {t("accounts.type")}
-          </label>
+          <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">{t("accounts.type")}</label>
           <select
             value={form.type}
             onChange={(e) => onChange({ type: e.target.value as AccountForm["type"] })}
-            className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+            className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none focus:border-[rgb(var(--accent))]"
           >
             {ACCOUNT_TYPES.map((type) => (
               <option key={type} value={type}>
-                {ACCOUNT_TYPE_LABELS[type]}
+                {ACCOUNT_TYPE_META[type].emoji} {ACCOUNT_TYPE_META[type].label}
               </option>
             ))}
           </select>
         </div>
         <div>
-          <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
-            {t("accounts.currency")}
-          </label>
+          <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">{t("accounts.currency")}</label>
           <select
             value={CURRENCIES.includes(form.currency) ? form.currency : ""}
             onChange={(e) => onChange({ currency: e.target.value })}
-            className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+            className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none focus:border-[rgb(var(--accent))]"
           >
-            {CURRENCIES.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
+            {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
             {!CURRENCIES.includes(form.currency) && form.currency && (
               <option value={form.currency}>{form.currency}</option>
             )}
@@ -449,16 +134,13 @@ function AccountFormFields({
       </div>
 
       <div>
-        <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
-          {t("accounts.balance")}
-        </label>
+        <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">{t("accounts.balance")}</label>
         <input
-          type="number"
-          step="any"
+          type="number" step="any"
           value={form.initialBalance}
           onChange={(e) => onChange({ initialBalance: e.target.value })}
           placeholder="0.00"
-          className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))] focus:ring-2 focus:ring-[rgb(var(--accent)/0.12)]"
+          className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none focus:border-[rgb(var(--accent))]"
         />
       </div>
 
@@ -474,20 +156,329 @@ function AccountFormFields({
 
       {showCreditFields && (
         <div>
-          <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
-            {t("accounts.creditLimit")}
-          </label>
+          <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">{t("accounts.creditLimit")}</label>
           <input
-            type="number"
-            step="any"
-            min="0"
+            type="number" step="any" min="0"
             value={form.creditLimit}
             onChange={(e) => onChange({ creditLimit: e.target.value })}
             placeholder="5000"
-            className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none transition focus:border-[rgb(var(--accent))] focus:ring-2 focus:ring-[rgb(var(--accent)/0.12)]"
+            className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none focus:border-[rgb(var(--accent))]"
           />
         </div>
       )}
-    </>
+    </div>
+  );
+}
+
+/* ── Main page ───────────────────────────────────── */
+export function AccountsPageClient() {
+  const { t, locale } = useI18n();
+  const { workspace } = useLuca();
+
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState<AccountForm>(defaultForm("USD"));
+
+  const [editingAccount, setEditingAccount] = useState<Account | null>(null);
+  const [editForm, setEditForm] = useState<AccountForm>(defaultForm("USD"));
+  const [archiveConfirmId, setArchiveConfirmId] = useState<string | null>(null);
+
+  function loadAccounts() {
+    if (!workspace) return;
+    setLoading(true);
+    apiFetch<{ accounts: Account[] }>(`/api/accounts?workspaceId=${workspace.id}`)
+      .then((r) => setAccounts(r.accounts.filter((a) => !a.isArchived)))
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => { loadAccounts(); }, [workspace]);
+
+  useEffect(() => {
+    if (workspace) setForm(defaultForm(workspace.baseCurrency));
+  }, [workspace]);
+
+  async function createAccount() {
+    if (!workspace || !form.name) return;
+    setSaving(true);
+    try {
+      await apiFetch("/api/accounts", {
+        method: "POST",
+        body: JSON.stringify({
+          workspaceId: workspace.id,
+          name: form.name,
+          type: form.type,
+          currency: form.currency,
+          initialBalance: Number(form.initialBalance),
+          isDebt: form.isDebt,
+          creditLimit: form.creditLimit ? Number(form.creditLimit) : null,
+        }),
+      });
+      setShowAddModal(false);
+      setForm(defaultForm(workspace.baseCurrency));
+      loadAccounts();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function startEdit(account: Account) {
+    setEditingAccount(account);
+    setEditForm({
+      name: account.name,
+      type: account.type,
+      currency: account.currency,
+      initialBalance: account.initialBalance,
+      isDebt: account.isDebt,
+      creditLimit: account.creditLimit ?? "",
+    });
+    setArchiveConfirmId(null);
+  }
+
+  async function saveEdit() {
+    if (!editingAccount) return;
+    setSaving(true);
+    try {
+      await apiFetch(`/api/accounts/${editingAccount.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: editForm.name,
+          type: editForm.type,
+          currency: editForm.currency,
+          isDebt: editForm.isDebt,
+          creditLimit: editForm.creditLimit ? Number(editForm.creditLimit) : null,
+        }),
+      });
+      setEditingAccount(null);
+      loadAccounts();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function archiveAccount(id: string) {
+    try {
+      await apiFetch(`/api/accounts/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ isArchived: true }),
+      });
+      setArchiveConfirmId(null);
+      setAccounts((prev) => prev.filter((a) => a.id !== id));
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  // Derived
+  const totalAssets = accounts.filter((a) => !a.isDebt).reduce((sum, a) => sum + Number(a.currentBalance), 0);
+  const totalDebt = accounts.filter((a) => a.isDebt).reduce((sum, a) => sum + Number(a.currentBalance), 0);
+  const netWorth = totalAssets + totalDebt; // debt balances are already negative
+  const baseCurrency = workspace?.baseCurrency ?? "USD";
+
+  return (
+    <div className="luca-page space-y-5">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">{t("accounts.title")}</h1>
+          <p className="mt-0.5 text-sm text-[rgb(var(--muted))]">{t("accounts.subtitle")}</p>
+        </div>
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-[rgb(var(--foreground))] px-4 text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85 active:scale-[0.97]"
+        >
+          <PlusIcon size={14} weight="bold" />
+          <span className="hidden sm:inline">{t("accounts.add")}</span>
+        </button>
+      </div>
+
+      {/* Summary cards */}
+      {!loading && accounts.length > 0 && (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+          <div className="luca-panel p-4">
+            <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-[rgb(var(--muted))]">
+              {locale === "ru" ? "Активы" : "Assets"}
+            </div>
+            <div className="text-lg font-bold tabular-nums text-[rgb(var(--positive))]">
+              {fmt(totalAssets, baseCurrency)}
+            </div>
+          </div>
+          {totalDebt !== 0 && (
+            <div className="luca-panel p-4">
+              <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-[rgb(var(--muted))]">
+                {locale === "ru" ? "Долги" : "Debts"}
+              </div>
+              <div className="text-lg font-bold tabular-nums text-[rgb(var(--negative))]">
+                {fmt(Math.abs(totalDebt), baseCurrency)}
+              </div>
+            </div>
+          )}
+          <div className="luca-panel p-4 col-span-2 lg:col-span-1">
+            <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-[rgb(var(--muted))]">
+              {locale === "ru" ? "Чистая стоимость" : "Net worth"}
+            </div>
+            <div className={["text-lg font-bold tabular-nums", netWorth >= 0 ? "text-[rgb(var(--foreground))]" : "text-[rgb(var(--negative))]"].join(" ")}>
+              {fmt(netWorth, baseCurrency)}
+            </div>
+            <div className="mt-0.5 text-xs text-[rgb(var(--muted))]">
+              {accounts.length} {locale === "ru" ? "счёт(а)" : "account(s)"}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Accounts list */}
+      {loading ? (
+        <div className="space-y-3">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-20 animate-pulse rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]" />
+          ))}
+        </div>
+      ) : accounts.length === 0 ? (
+        <div className="flex flex-col items-center rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] py-20 text-center">
+          <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-[rgb(var(--surface-soft))]">
+            <span className="text-2xl opacity-30">🏦</span>
+          </div>
+          <p className="text-sm text-[rgb(var(--muted))]">{t("accounts.empty")}</p>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="mt-4 flex h-9 items-center gap-2 rounded-lg border border-[rgb(var(--border))] px-3 text-sm text-[rgb(var(--foreground))] transition hover:bg-[rgb(var(--surface-soft))]"
+          >
+            <PlusIcon size={14} weight="bold" />
+            {t("accounts.add")}
+          </button>
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
+          {accounts.map((account, idx) => (
+            <div
+              key={account.id}
+              className={[
+                "group flex items-center gap-3 px-5 py-4 transition-colors hover:bg-[rgb(var(--surface-soft))]",
+                idx < accounts.length - 1 ? "border-b border-[rgb(var(--border-soft))]" : "",
+              ].join(" ")}
+            >
+              {/* Icon */}
+              <div className={[
+                "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl",
+                account.isDebt ? "bg-[rgb(var(--negative-dim))]" : "bg-[rgb(var(--surface-soft))]",
+              ].join(" ")}>
+                <AccountIcon type={account.type} isDebt={account.isDebt} />
+              </div>
+
+              {/* Info */}
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold text-[rgb(var(--foreground))]">{account.name}</span>
+                  <span className="rounded-md bg-[rgb(var(--surface-soft))] px-1.5 py-0.5 text-[10px] font-medium text-[rgb(var(--muted))]">
+                    {ACCOUNT_TYPE_META[account.type].label}
+                  </span>
+                  {account.isDebt && (
+                    <span className="rounded-md bg-[rgb(var(--negative-dim))] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[rgb(var(--negative))]">
+                      {t("accounts.debtBadge")}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-[rgb(var(--muted))]">
+                  <span className={["tabular-nums font-medium",
+                    Number(account.currentBalance) >= 0 ? "text-[rgb(var(--positive))]" : "text-[rgb(var(--negative))]",
+                  ].join(" ")}>
+                    {Number(account.currentBalance) >= 0 ? "" : "−"}
+                    {fmt(Math.abs(Number(account.currentBalance)), account.currency)}
+                  </span>
+                  {account.creditLimit && Number(account.creditLimit) > 0 && (
+                    <span>
+                      {t("accounts.creditLimit")}: {fmt(account.creditLimit, account.currency)}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Actions */}
+              {archiveConfirmId === account.id ? (
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <span className="hidden text-xs text-[rgb(var(--muted))] sm:inline">
+                    {t("accounts.archiveConfirm")}
+                  </span>
+                  <button
+                    onClick={() => archiveAccount(account.id)}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg bg-[rgb(var(--negative-dim))] text-[rgb(var(--negative))] transition hover:opacity-80"
+                  >
+                    <CheckIcon size={12} weight="bold" />
+                  </button>
+                  <button
+                    onClick={() => setArchiveConfirmId(null)}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg border border-[rgb(var(--border))] text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))]"
+                  >
+                    <XIcon size={12} />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                  <button
+                    onClick={() => startEdit(account)}
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]"
+                    title={t("accounts.edit")}
+                  >
+                    <PencilIcon size={14} weight="bold" />
+                  </button>
+                  <button
+                    onClick={() => { setArchiveConfirmId(account.id); }}
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--negative-dim))] hover:text-[rgb(var(--negative))]"
+                    title={t("accounts.archiveConfirm")}
+                  >
+                    <ArchiveIcon size={14} weight="bold" />
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add modal */}
+      <Modal
+        open={showAddModal}
+        onClose={() => { setShowAddModal(false); setForm(defaultForm(workspace?.baseCurrency ?? "USD")); }}
+        title={t("accounts.add")}
+        maxWidth="sm"
+        footer={
+          <button
+            onClick={createAccount}
+            disabled={saving || !form.name}
+            className="h-11 w-full rounded-xl bg-[rgb(var(--foreground))] text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85 disabled:opacity-40"
+          >
+            {saving ? t("common.loading") : t("common.save")}
+          </button>
+        }
+      >
+        <AccountFormFields form={form} onChange={(p) => setForm((f) => ({ ...f, ...p }))} t={t} />
+      </Modal>
+
+      {/* Edit modal */}
+      <Modal
+        open={!!editingAccount}
+        onClose={() => setEditingAccount(null)}
+        title={t("accounts.edit")}
+        maxWidth="sm"
+        footer={
+          <button
+            onClick={saveEdit}
+            disabled={saving || !editForm.name}
+            className="h-11 w-full rounded-xl bg-[rgb(var(--foreground))] text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85 disabled:opacity-40"
+          >
+            {saving ? t("common.loading") : t("common.save")}
+          </button>
+        }
+      >
+        <AccountFormFields form={editForm} onChange={(p) => setEditForm((f) => ({ ...f, ...p }))} t={t} />
+      </Modal>
+    </div>
   );
 }
