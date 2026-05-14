@@ -106,12 +106,39 @@ export type CreateGoalOp = {
   deadline?: string | null;
 };
 
+export type DeleteTransactionsOp = {
+  type: "DELETE_TRANSACTIONS";
+  ids: string[];
+};
+
+export type UpdateTransactionOp = {
+  type: "UPDATE_TRANSACTION";
+  id: string;
+  fields: {
+    amount?: number;
+    currency?: string;
+    merchant?: string | null;
+    comment?: string | null;
+    date?: string;
+    categoryId?: string | null;
+  };
+};
+
+export type UpdateGoalProgressOp = {
+  type: "UPDATE_GOAL_PROGRESS";
+  goalName: string;
+  amount: number;
+};
+
 export type AiOperation =
   | CreateTransactionsOp
   | CreateAccountOp
   | CreateCategoriesOp
   | SetBudgetOp
-  | CreateGoalOp;
+  | CreateGoalOp
+  | DeleteTransactionsOp
+  | UpdateTransactionOp
+  | UpdateGoalProgressOp;
 
 export type AiAction = {
   id: string;

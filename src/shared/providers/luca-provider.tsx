@@ -8,6 +8,7 @@ export type LucaWorkspace = {
   name: string;
   type: "PERSONAL" | "BUSINESS" | "CUSTOM";
   baseCurrency: string;
+  role: "VIEWER" | "MEMBER" | "ADMIN" | "OWNER";
 };
 
 export type LucaAccount = {
@@ -49,6 +50,7 @@ type LucaContextValue = {
   isLoading: boolean;
   transactionKey: number;
   isNewUser: boolean;
+  isViewer: boolean;
   setWorkspaceId: (id: string) => void;
   reload: () => Promise<void>;
   confirmOnboarding: (currency: string) => Promise<void>;
@@ -136,6 +138,8 @@ export function LucaProvider({ children }: { children: React.ReactNode }) {
     setIsNewUser(false);
   }
 
+  const isViewer = workspace?.role === "VIEWER";
+
   return (
     <LucaContext.Provider
       value={{
@@ -146,6 +150,7 @@ export function LucaProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         transactionKey,
         isNewUser,
+        isViewer,
         setWorkspaceId,
         reload: load,
         confirmOnboarding,

@@ -16,12 +16,13 @@ import {
   MoonStarsIcon,
   PaperPlaneTiltIcon,
   PlusIcon,
+  ScalesIcon,
   SignOutIcon,
   SparkleIcon,
   SunDimIcon,
   TagIcon,
   TargetIcon,
-  WalletIcon
+  WalletIcon,
 } from "@phosphor-icons/react/dist/ssr";
 
 export const AppIcons = {
@@ -52,4 +53,5 @@ export const AppIcons = {
   categories: TagIcon,
   budget: ChartBarIcon,
   exchangeRates: CurrencyDollarIcon,
+  netWorth: ScalesIcon,
 };

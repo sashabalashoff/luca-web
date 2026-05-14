@@ -20,6 +20,18 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { OnboardingCurrencyDialog } from "./onboarding-currency-dialog";
 
+function formatRelativeTime(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 // Settings removed from nav — accessible via footer three-dot menu
 const nav = [
   { href: "/app",               labelKey: "navigation.chat",         icon: AppIcons.chat },
@@ -30,6 +42,7 @@ const nav = [
   { href: "/app/budget",        labelKey: "navigation.budget",       icon: AppIcons.budget },
   { href: "/app/reports",         labelKey: "navigation.reports",        icon: AppIcons.reports },
   { href: "/app/goals",           labelKey: "navigation.goals",          icon: AppIcons.goals },
+  { href: "/app/net-worth",        labelKey: "navigation.netWorth",       icon: AppIcons.netWorth },
   { href: "/app/exchange-rates",  labelKey: "navigation.exchangeRates",  icon: AppIcons.exchangeRates },
 ];
 
@@ -113,15 +126,33 @@ function ChatSessionsList({
   const activeSessionId = searchParams.get("s");
   const isChatRoute = pathname === `/${locale}/app`;
   const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   useEffect(() => {
     if (!workspace || !isChatRoute) return;
-    apiFetch<{ sessions: ChatSession[] }>(
-      `/api/ai/chat/sessions?workspaceId=${workspace.id}`
+    setSessions([]);
+    setNextCursor(null);
+    apiFetch<{ sessions: ChatSession[]; nextCursor: string | null }>(
+      `/api/ai/chat/sessions?workspaceId=${workspace.id}&limit=20`
     )
-      .then((r) => setSessions(r.sessions))
+      .then((r) => { setSessions(r.sessions); setNextCursor(r.nextCursor); })
       .catch(console.error);
   }, [workspace, isChatRoute, activeSessionId]);
+
+  async function loadMore() {
+    if (!workspace || !nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const r = await apiFetch<{ sessions: ChatSession[]; nextCursor: string | null }>(
+        `/api/ai/chat/sessions?workspaceId=${workspace.id}&limit=20&cursor=${nextCursor}`
+      );
+      setSessions((prev) => [...prev, ...r.sessions]);
+      setNextCursor(r.nextCursor);
+    } catch { /* ignore */ } finally {
+      setLoadingMore(false);
+    }
+  }
 
   if (!isChatRoute) return <div className="flex-1" />;
 
@@ -146,24 +177,38 @@ function ChatSessionsList({
             {t("chat.noSessions")}
           </p>
         ) : (
-          sessions.map((session) => {
-            const isActive = session.id === activeSessionId;
-            return (
-              <Link
-                key={session.id}
-                href={`/${locale}/app?s=${session.id}`}
-                onClick={onNavigate}
-                className={[
-                  "block truncate rounded-lg px-3 py-[6px] text-xs transition-colors duration-100",
-                  isActive
-                    ? "bg-[rgb(var(--surface-soft))] font-medium text-[rgb(var(--foreground))]"
-                    : "text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]",
-                ].join(" ")}
+          <>
+            {sessions.map((session) => {
+              const isActive = session.id === activeSessionId;
+              return (
+                <Link
+                  key={session.id}
+                  href={`/${locale}/app?s=${session.id}`}
+                  onClick={onNavigate}
+                  className={[
+                    "block rounded-lg px-3 py-[6px] transition-colors duration-100",
+                    isActive
+                      ? "bg-[rgb(var(--surface-soft))] font-medium text-[rgb(var(--foreground))]"
+                      : "text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]",
+                  ].join(" ")}
+                >
+                  <div className="truncate text-xs">{session.title || t("chat.newChat")}</div>
+                  <div className="mt-0.5 text-[10px] text-[rgb(var(--muted-soft))]">
+                    {formatRelativeTime(session.updatedAt)}
+                  </div>
+                </Link>
+              );
+            })}
+            {nextCursor && (
+              <button
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="w-full rounded-lg px-3 py-1.5 text-[11px] text-[rgb(var(--muted))] hover:text-[rgb(var(--foreground))] transition disabled:opacity-50"
               >
-                {session.title || t("chat.newChat")}
-              </Link>
-            );
-          })
+                {loadingMore ? t("common.loading") : t("chat.loadMore")}
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>

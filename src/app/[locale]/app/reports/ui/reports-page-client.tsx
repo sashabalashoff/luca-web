@@ -4,7 +4,19 @@ import { apiFetch } from "@/shared/api/client";
 import { useI18n } from "@/shared/i18n/i18n-provider";
 import { useLuca } from "@/shared/providers/luca-provider";
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/ssr";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import useSWR from "swr";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 type Summary = {
   period: { start: string; end: string };
@@ -13,6 +25,12 @@ type Summary = {
   net: number;
   savingsRate: number;
   categoryBreakdown: Array<{ name: string; amount: number }>;
+};
+
+type MonthPoint = {
+  label: string;
+  income: number;
+  expenses: number;
 };
 
 function getMonthName(month: number, locale: string): string {
@@ -35,6 +53,20 @@ function fmt(n: number) {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+async function fetchTrendMonths(workspaceId: string, year: number, month: number, locale: string): Promise<MonthPoint[]> {
+  const results = await Promise.allSettled(
+    Array.from({ length: 6 }, (_, i) => {
+      const d = new Date(Date.UTC(year, month - 1 - (5 - i), 1));
+      const { dateFrom, dateTo } = getDateRange(d.getUTCFullYear(), d.getUTCMonth() + 1);
+      const label = d.toLocaleString(locale === "ru" ? "ru-RU" : "en-US", { month: "short" });
+      return apiFetch<Summary>(
+        `/api/reports/monthly-summary?workspaceId=${workspaceId}&dateFrom=${dateFrom}&dateTo=${dateTo}`
+      ).then((data) => ({ label, income: data.income, expenses: data.expenses }));
+    })
+  );
+  return results.flatMap((r) => r.status === "fulfilled" ? [r.value] : []);
+}
+
 export function ReportsPageClient() {
   const { t, locale } = useI18n();
   const { workspace } = useLuca();
@@ -42,32 +74,26 @@ export function ReportsPageClient() {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const [loading, setLoading] = useState(true);
   const [csvLoading, setCsvLoading] = useState(false);
 
   const yearOptions = Array.from({ length: 5 }, (_, i) => now.getFullYear() - i);
 
-  useEffect(() => {
-    if (!workspace) return;
-    let active = true;
-    async function fetchData() {
-      if (active) setLoading(true);
-      try {
-        const { dateFrom, dateTo } = getDateRange(year, month);
-        const data = await apiFetch<Summary>(
-          `/api/reports/monthly-summary?workspaceId=${workspace!.id}&dateFrom=${dateFrom}&dateTo=${dateTo}`
-        );
-        if (active) setSummary(data);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        if (active) setLoading(false);
-      }
-    }
-    fetchData();
-    return () => { active = false; };
-  }, [workspace, year, month]);
+  const { dateFrom, dateTo } = getDateRange(year, month);
+  const summaryKey = workspace
+    ? `/api/reports/monthly-summary?workspaceId=${workspace.id}&dateFrom=${dateFrom}&dateTo=${dateTo}`
+    : null;
+  const { data: summary, isLoading: loading } = useSWR<Summary>(
+    summaryKey,
+    (url: string) => apiFetch<Summary>(url),
+    { revalidateOnFocus: false, dedupingInterval: 60_000 }
+  );
+
+  const trendKey = workspace ? `trend:${workspace.id}:${year}:${month}:${locale}` : null;
+  const { data: trend = [], isLoading: trendLoading } = useSWR<MonthPoint[]>(
+    trendKey,
+    () => fetchTrendMonths(workspace!.id, year, month, locale),
+    { revalidateOnFocus: false, dedupingInterval: 120_000 }
+  );
 
   async function handleCSVDownload() {
     if (!workspace) return;
@@ -141,6 +167,61 @@ export function ReportsPageClient() {
           >
             <DownloadSimpleIcon size={15} weight="bold" />
           </button>
+        </div>
+      </div>
+
+      {/* 6-month trend chart */}
+      <div className="overflow-hidden rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
+        <div className="border-b border-[rgb(var(--border-soft))] px-5 py-4">
+          <span className="text-sm font-semibold">{t("reports.trend")}</span>
+        </div>
+        <div className="p-5">
+          {trendLoading ? (
+            <div className="h-44 animate-pulse rounded-xl bg-[rgb(var(--surface-soft))]" />
+          ) : (
+            <ResponsiveContainer width="100%" height={176}>
+              <BarChart data={trend} margin={{ top: 4, right: 4, left: -16, bottom: 0 }}>
+                <CartesianGrid vertical={false} stroke="rgb(var(--border-soft))" strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 11, fill: "rgb(var(--muted))" }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fontSize: 11, fill: "rgb(var(--muted))" }}
+                  tickFormatter={(v) => v >= 1000 ? (v / 1000).toFixed(0) + "k" : v}
+                  axisLine={false}
+                  tickLine={false}
+                  width={40}
+                />
+                <Tooltip
+                  cursor={{ fill: "rgb(var(--surface-soft))" }}
+                  formatter={(value, name) => [
+                    `${currency} ${fmt(Number(value ?? 0))}`,
+                    name === "income" ? t("reports.income") : t("reports.expenses"),
+                  ]}
+                  contentStyle={{
+                    background: "rgb(var(--surface))",
+                    border: "1px solid rgb(var(--border))",
+                    borderRadius: 10,
+                    fontSize: 12,
+                    color: "rgb(var(--foreground))",
+                  }}
+                />
+                <Legend
+                  formatter={(v) => v === "income" ? t("reports.income") : t("reports.expenses")}
+                  wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
+                />
+                <Bar dataKey="income" fill="rgb(var(--positive))" fillOpacity={0.8} radius={[3, 3, 0, 0]} maxBarSize={28}>
+                  {trend.map((_, i) => <Cell key={i} />)}
+                </Bar>
+                <Bar dataKey="expenses" fill="rgb(var(--negative))" fillOpacity={0.8} radius={[3, 3, 0, 0]} maxBarSize={28}>
+                  {trend.map((_, i) => <Cell key={i} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </div>
 

@@ -13,6 +13,7 @@ import {
   ArrowsLeftRightIcon,
   CalendarBlankIcon,
   CheckIcon,
+  DownloadSimpleIcon,
   FunnelSimpleIcon,
   MagnifyingGlassIcon,
   PencilLineIcon,
@@ -83,7 +84,7 @@ const todayIso = new Date().toISOString().split("T")[0];
 
 export function TransactionsPageClient() {
   const { t, locale } = useI18n();
-  const { workspace, accounts, defaultAccount, isLoading: bootstrapLoading, reload: reloadContext } = useLuca();
+  const { workspace, accounts, defaultAccount, isLoading: bootstrapLoading, reload: reloadContext, isViewer } = useLuca();
 
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -109,6 +110,41 @@ export function TransactionsPageClient() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
+
+  // CSV export
+  const [csvLoading, setCsvLoading] = useState(false);
+
+  async function handleCSVExport() {
+    if (!workspace) return;
+    setCsvLoading(true);
+    try {
+      const p = new URLSearchParams({ workspaceId: workspace.id, format: "csv", limit: "5000" });
+      if (filter !== "ALL") p.set("type", filter);
+      if (debouncedSearch) p.set("search", debouncedSearch);
+      if (dateFrom) p.set("dateFrom", dateFrom);
+      if (dateTo) p.set("dateTo", dateTo);
+      if (filterAccountId) p.set("accountId", filterAccountId);
+      if (filterCategoryId) p.set("categoryId", filterCategoryId);
+
+      const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+      const { createSupabaseBrowserClient } = await import("@/shared/lib/supabase/client");
+      const { data: { session } } = await createSupabaseBrowserClient().auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch(`${apiBase}/api/transactions?${p.toString()}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "luca-transactions.csv";
+      link.click();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setCsvLoading(false);
+    }
+  }
 
   // Add form
   const [showAddForm, setShowAddForm] = useState(false);
@@ -340,13 +376,26 @@ export function TransactionsPageClient() {
           <h1 className="text-xl font-semibold tracking-tight">{t("transactions.title")}</h1>
           <p className="mt-0.5 text-sm text-[rgb(var(--muted))]">{t("transactions.subtitle")}</p>
         </div>
-        <button
-          onClick={() => setShowAddForm(true)}
-          className="flex items-center gap-1.5 rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2 text-sm font-medium text-[rgb(var(--foreground))] transition hover:bg-[rgb(var(--surface-soft))] active:scale-[0.97]"
-        >
-          <PlusIcon size={14} weight="bold" />
-          {t("transactions.new")}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleCSVExport}
+            disabled={csvLoading}
+            title={t("transactions.exportCsv")}
+            className="flex h-9 items-center gap-1.5 rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 text-sm font-medium text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))] active:scale-[0.97] disabled:opacity-50"
+          >
+            <DownloadSimpleIcon size={14} />
+            <span className="hidden sm:inline">{t("transactions.exportCsv")}</span>
+          </button>
+          {!isViewer && (
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3 py-2 text-sm font-medium text-[rgb(var(--foreground))] transition hover:bg-[rgb(var(--surface-soft))] active:scale-[0.97]"
+            >
+              <PlusIcon size={14} weight="bold" />
+              {t("transactions.new")}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Add Transaction Modal */}
@@ -775,6 +824,7 @@ export function TransactionsPageClient() {
                     onDeleteCancel={() => setConfirmDeleteId(null)}
                     onEditToggle={() => setEditingId((prev) => (prev === tx.id ? null : tx.id))}
                     onEditSave={handleEditSave}
+                    readOnly={isViewer}
                     t={t}
                   />
                 ))}
@@ -816,6 +866,7 @@ function TxRow({
   onDeleteCancel,
   onEditToggle,
   onEditSave,
+  readOnly = false,
   t,
 }: {
   tx: Transaction;
@@ -830,6 +881,7 @@ function TxRow({
   onDeleteCancel: () => void;
   onEditToggle: () => void;
   onEditSave: (updated: Transaction) => void;
+  readOnly?: boolean;
   t: (key: string) => string;
 }) {
   const isExpense = tx.type === "EXPENSE";
@@ -955,7 +1007,7 @@ function TxRow({
 
         {/* Actions */}
         <div className="ml-1 flex shrink-0 items-center gap-0.5">
-          {confirmingDelete ? (
+          {!readOnly && confirmingDelete ? (
             <>
               <span className="mr-1 text-xs text-[rgb(var(--muted))]">{t("transactions.confirmDeleteQ")}</span>
               <button
@@ -972,7 +1024,7 @@ function TxRow({
                 <XIcon size={11} />
               </button>
             </>
-          ) : (
+          ) : !readOnly ? (
             <>
               <button
                 onClick={onEditToggle}
@@ -995,7 +1047,7 @@ function TxRow({
                 <TrashIcon size={13} weight="bold" />
               </button>
             </>
-          )}
+          ) : null}
         </div>
       </div>
 

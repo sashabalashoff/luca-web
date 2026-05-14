@@ -8,13 +8,49 @@ import { LanguageSwitcher } from "@/shared/ui/language-switcher";
 import { ThemeSwitcher } from "@/shared/ui/theme-switcher";
 import { CheckIcon, PlusIcon, SignOutIcon } from "@phosphor-icons/react/dist/ssr";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export default function SettingsPage() {
   const { t, locale } = useI18n();
   const { workspace, accounts, reload } = useLuca();
   const router = useRouter();
   const supabase = createSupabaseBrowserClient();
+
+  /* Profile editing */
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userName, setUserName] = useState<string | null>(null);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [profileInput, setProfileInput] = useState("");
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileSaved, setProfileSaved] = useState(false);
+
+  useEffect(() => {
+    apiFetch<{ user: { email: string; name: string | null } }>("/api/settings")
+      .then((data) => {
+        setUserEmail(data.user.email);
+        setUserName(data.user.name);
+      })
+      .catch(console.error);
+  }, []);
+
+  async function saveProfile() {
+    if (!profileInput.trim()) return;
+    setSavingProfile(true);
+    try {
+      await apiFetch("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ name: profileInput.trim() }),
+      });
+      setUserName(profileInput.trim());
+      setProfileSaved(true);
+      setTimeout(() => setProfileSaved(false), 2000);
+      setEditingProfile(false);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSavingProfile(false);
+    }
+  }
 
   /* Workspace editing */
   const [wsName, setWsName] = useState("");
@@ -103,6 +139,59 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-xl space-y-4">
+      {/* Profile */}
+      <Section label={t("settings.profile")}>
+        <Row label={t("settings.email")}>
+          <span className="text-sm text-[rgb(var(--muted))]">{userEmail ?? "…"}</span>
+        </Row>
+        <Row label={t("settings.displayName")}>
+          {editingProfile ? (
+            <div className="flex items-center gap-2">
+              <input
+                autoFocus
+                value={profileInput}
+                onChange={(e) => setProfileInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveProfile();
+                  if (e.key === "Escape") setEditingProfile(false);
+                }}
+                placeholder={t("settings.displayNamePlaceholder")}
+                className="rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-2.5 py-1.5 text-sm outline-none focus:border-[rgb(var(--accent))]"
+              />
+              <button
+                onClick={saveProfile}
+                disabled={savingProfile || !profileInput.trim()}
+                className="flex h-7 w-7 items-center justify-center rounded-lg bg-[rgb(var(--foreground))] text-[rgb(var(--background))] disabled:opacity-40"
+              >
+                <CheckIcon size={13} weight="bold" />
+              </button>
+              <button
+                onClick={() => setEditingProfile(false)}
+                className="flex h-7 w-7 items-center justify-center rounded-lg border border-[rgb(var(--border))] text-[rgb(var(--muted))]"
+              >
+                <span className="text-xs">✕</span>
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => {
+                setProfileInput(userName ?? "");
+                setEditingProfile(true);
+              }}
+              className="flex items-center gap-1.5 text-sm text-[rgb(var(--muted))] transition hover:text-[rgb(var(--foreground))]"
+            >
+              {profileSaved ? (
+                <span className="flex items-center gap-1 text-[rgb(var(--positive))]">
+                  <CheckIcon size={12} weight="bold" /> {t("settings.saved")}
+                </span>
+              ) : (
+                userName || <span className="italic opacity-50">{t("settings.notSet")}</span>
+              )}
+            </button>
+          )}
+        </Row>
+      </Section>
+
       {/* Appearance */}
       <Section label={t("settings.appearance")}>
         <Row label={t("common.theme")}>

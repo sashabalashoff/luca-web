@@ -38,6 +38,7 @@ navigation:
   accounts: "Счета"
   categories: "Категории"
   budget: "Бюджет"
+  netWorth: "Капитал"
   exchangeRates: "Курсы валют"
 
 chat:
@@ -85,11 +86,31 @@ chat:
   noDeadline: "Без дедлайна"
   startRecording: "Голосовой ввод"
   stopRecording: "Остановить запись"
+  scanReceipt: "Сканировать чек"
+  scanning: "Сканирую чек..."
+  loadMore: "Загрузить ещё чаты"
+  receiptNoTransactions: "Не удалось найти транзакции в этом чеке. Попробуйте сделать чёткое фото."
+  receiptError: "Не удалось сканировать чек. Попробуйте ещё раз."
+  budgetStatus: "Статус бюджетов"
+  goalsProgress: "Прогресс целей"
+  spendingByCategory: "Расходы по категориям"
+  recentTransactions: "Последние транзакции"
   welcome: "Чем могу помочь?"
   listening: "Слушаю..."
   rejected: "Отклонено"
   enterHint: "Enter для отправки"
   currency: "Валюта"
+  deleteOp: "Удалить"
+  updateOp: "Изменить"
+  updateGoalOp: "Обновить цель"
+  willBeDeleted: "Будут удалены без возможности восстановления"
+  updateTxTitle: "Изменить транзакцию"
+  newProgress: "Новый прогресс"
+  txDeleted: "Удалено"
+  txUpdated: "Обновлено"
+  goalUpdated: "Цель обновлена"
+  transaction: "транзакция"
+  transactions: "транзакций"
 
 dashboard:
   title: "Дашборд"
@@ -126,10 +147,12 @@ transactions:
   allAccounts: "Все счета"
   category: "Категория"
   allCategories: "Все категории"
+  noCategory: "Без категории"
   clearFilters: "Сбросить фильтры"
   currency: "Валюта"
   loadMore: "Загрузить ещё"
   loadingMore: "Загрузка..."
+  exportCsv: "Экспорт CSV"
 
 reports:
   title: "Отчёты"
@@ -142,6 +165,7 @@ reports:
   byCategory: "По категориям"
   noData: "Нет данных за этот период."
   exportCSV: "Экспорт CSV"
+  trend: "Динамика за 6 месяцев"
 
 goals:
   title: "Цели"
@@ -161,6 +185,11 @@ goals:
 settings:
   title: "Настройки"
   subtitle: "Workspace, счета и предпочтения."
+  profile: "Профиль"
+  email: "Email"
+  displayName: "Отображаемое имя"
+  displayNamePlaceholder: "Ваше имя"
+  notSet: "Не задано"
   appearance: "Внешний вид"
   workspace: "Workspace"
   workspaceName: "Название"
@@ -214,7 +243,10 @@ categories:
   editTitle: "Редактировать категорию"
   newTitle: "Новая категория"
   subcategories: "подкатег."
-  addSub: "Подкат."
+  addSub: "Добавить подкат."
+  sub: "Подкат."
+  search: "Поиск категорий..."
+  noResults: "Категории не найдены."
 
 exchangeRates:
   title: "Курсы валют"
@@ -253,6 +285,15 @@ budget:
   left: "осталось"
   over: "перерасход"
   currency: "Валюта"
+
+netWorth:
+  title: "Чистый капитал"
+  subtitle: "Все активы за вычетом обязательств."
+  netWorth: "Чистый капитал"
+  totalAssets: "Итого активов"
+  totalLiabilities: "Итого обязательств"
+  assets: "Активы"
+  liabilities: "Обязательства"
 
 onboarding:
   title: "Добро пожаловать в LUCA"

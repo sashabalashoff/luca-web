@@ -7,15 +7,20 @@ import type {
   CreateCategoriesOp,
   CreateGoalOp,
   CreateTransactionsOp,
+  DeleteTransactionsOp,
   ParsedTransaction,
   SetBudgetOp,
+  UpdateGoalProgressOp,
+  UpdateTransactionOp,
 } from "@/shared/api/types";
 import { useI18n } from "@/shared/i18n/i18n-provider";
 import { useLuca } from "@/shared/providers/luca-provider";
 import { AccountPicker } from "@/shared/ui/account-picker";
 import {
+  ArrowDownIcon,
   ArrowUpIcon,
   BankIcon,
+  CameraIcon,
   CheckIcon,
   FolderIcon,
   MicrophoneIcon,
@@ -23,10 +28,20 @@ import {
   SlidersIcon,
   StopCircleIcon,
   TargetIcon,
-  XIcon
+  TrashIcon,
+  XIcon,
 } from "@phosphor-icons/react/dist/ssr";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import {
+  Bar,
+  BarChart,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -64,21 +79,26 @@ type Message = {
   streaming?: boolean;
   savedOperations?: AiOperation[];
   thinkingSteps?: ThinkingStep[];
+  displayType?: string;
 };
 
 const INTRO_ID = "intro";
 
 const EXAMPLE_PROMPTS_EN = [
-  "Spent $42 on groceries",
+  "How much did I spend this month?",
+  "Spent $50 on groceries",
+  "Show my budget status",
+  "What are my top spending categories?",
   "Received salary $3000",
-  "Paid rent $800 from card",
-  "Coffee $5, lunch $12",
+  "Transfer $200 to savings account",
 ];
 const EXAMPLE_PROMPTS_RU = [
-  "Потратил 500₽ на продукты",
+  "Сколько я потратил в этом месяце?",
+  "Потратил 2000₽ в продуктовом",
+  "Покажи статус моих бюджетов",
+  "Мои топ-категории расходов",
   "Получил зарплату 80 000₽",
-  "Оплатил аренду 30 000₽",
-  "Кофе 250₽, обед 600₽",
+  "Перевёл 5000₽ на сберегательный счёт",
 ];
 
 function extractOperations(payloadJson: Record<string, unknown>): AiOperation[] {
@@ -91,11 +111,16 @@ function extractOperations(payloadJson: Record<string, unknown>): AiOperation[] 
   return [];
 }
 
+// ─── Category type (minimal, for picker) ─────────────────────────────────────
+
+type ChatCategory = { id: string; name: string; type: string };
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function ChatPageClient() {
   const { t, locale } = useI18n();
   const { workspace, accounts, defaultAccount, isLoading, reload } = useLuca();
+  const [categories, setCategories] = useState<ChatCategory[]>([]);
   const router = useRouter();
   const searchParams = useSearchParams();
   const sessionId = searchParams.get("s");
@@ -105,12 +130,21 @@ export function ChatPageClient() {
   ]);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [isReceiptScanning, setIsReceiptScanning] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+
+  useEffect(() => {
+    if (!workspace) return;
+    apiFetch<{ categories: ChatCategory[] }>(`/api/categories?workspaceId=${workspace.id}`)
+      .then((r) => setCategories(r.categories))
+      .catch(() => {});
+  }, [workspace]);
 
   const sessionWasCreatedByUs = useRef(new Set<string>());
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
   const voiceBaseRef = useRef("");
@@ -297,10 +331,11 @@ export function ChatPageClient() {
           } else if (eventType === "done") {
             const newSessionId = payload.sessionId as string;
             const finalMessage = payload.finalMessage as string | undefined;
+            const displayType = payload.displayType as string | undefined;
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsgId
-                  ? { ...m, streaming: false, content: finalMessage ?? m.content }
+                  ? { ...m, streaming: false, content: finalMessage ?? m.content, displayType }
                   : m
               )
             );
@@ -330,6 +365,75 @@ export function ChatPageClient() {
     }
   }
 
+  async function scanReceipt(file: File) {
+    if (!workspace || isReceiptScanning) return;
+    setIsReceiptScanning(true);
+
+    const userMsgId = crypto.randomUUID();
+    const assistantMsgId = crypto.randomUUID();
+
+    setMessages((prev) => [
+      ...prev.filter((m) => m.id !== INTRO_ID),
+      { id: userMsgId, role: "user", content: `📷 ${file.name}` },
+      { id: assistantMsgId, role: "assistant", content: "", streaming: true },
+    ]);
+
+    try {
+      const token = await getAuthToken();
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("workspaceId", workspace.id);
+
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/ai/receipt`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: fd,
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json() as {
+        actionId: string | null;
+        operations: AiOperation[];
+        message: string;
+      };
+
+      if (!data.actionId || !data.operations?.length) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId
+              ? { ...m, content: t("chat.receiptNoTransactions"), streaming: false }
+              : m
+          )
+        );
+        return;
+      }
+
+      const overrides = buildInitialOverrides(data.operations, accounts, defaultAccount?.id);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantMsgId
+            ? {
+                ...m,
+                content: data.message,
+                streaming: false,
+                action: { id: data.actionId!, status: "PENDING", operations: data.operations, overrides },
+              }
+            : m
+        )
+      );
+    } catch {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantMsgId
+            ? { ...m, content: t("chat.receiptError"), streaming: false }
+            : m
+        )
+      );
+    } finally {
+      setIsReceiptScanning(false);
+    }
+  }
+
   async function confirmAction(actionId: string) {
     const msg = messages.find((m) => m.action?.id === actionId);
     const action = msg?.action;
@@ -356,6 +460,7 @@ export function ChatPageClient() {
             ...(ov.currency !== undefined && { currency: ov.currency }),
             ...(ov.merchant !== undefined && { merchant: ov.merchant }),
             ...(ov.date !== undefined && { date: ov.date }),
+            ...(ov.comment !== undefined && { comment: ov.comment }),
           };
         }),
       };
@@ -504,17 +609,35 @@ export function ChatPageClient() {
             {/* Input in welcome state */}
             <ChatInput
               textareaRef={textareaRef}
+              fileInputRef={fileInputRef}
               input={input}
               setInput={setInput}
               isSending={isSending}
               isLoading={isLoading}
               isRecording={isRecording}
+              isReceiptScanning={isReceiptScanning}
               onSend={() => sendMessage()}
               onToggleRecording={toggleRecording}
+              onReceiptFile={scanReceipt}
               onGrow={growTextarea}
               t={t}
               locale={locale}
             />
+
+            {/* Suggestion chips */}
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              {(locale === "ru" ? EXAMPLE_PROMPTS_RU : EXAMPLE_PROMPTS_EN).map((prompt) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  onClick={() => sendMessage(prompt)}
+                  disabled={isSending || isLoading}
+                  className="rounded-full border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3.5 py-1.5 text-xs text-[rgb(var(--muted))] transition hover:border-[rgb(var(--border-soft))] hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))] active:scale-95 disabled:pointer-events-none disabled:opacity-40"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       ) : (
@@ -528,6 +651,7 @@ export function ChatPageClient() {
                   key={message.id}
                   message={message}
                   accounts={accounts}
+                  categories={categories}
                   onConfirm={confirmAction}
                   onReject={rejectAction}
                   onUpdateOverride={updateOverride}
@@ -546,13 +670,16 @@ export function ChatPageClient() {
           <div className="mx-auto max-w-2xl px-3 py-3 sm:px-4 lg:px-6">
             <ChatInput
               textareaRef={textareaRef}
+              fileInputRef={fileInputRef}
               input={input}
               setInput={setInput}
               isSending={isSending}
               isLoading={isLoading}
               isRecording={isRecording}
+              isReceiptScanning={isReceiptScanning}
               onSend={() => sendMessage()}
               onToggleRecording={toggleRecording}
+              onReceiptFile={scanReceipt}
               onGrow={growTextarea}
               t={t}
               locale={locale}
@@ -568,29 +695,37 @@ export function ChatPageClient() {
 
 function ChatInput({
   textareaRef,
+  fileInputRef,
   input,
   setInput,
   isSending,
   isLoading,
   isRecording,
+  isReceiptScanning,
   onSend,
   onToggleRecording,
+  onReceiptFile,
   onGrow,
   t,
   locale,
 }: {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
   input: string;
   setInput: (v: string) => void;
   isSending: boolean;
   isLoading: boolean;
   isRecording: boolean;
+  isReceiptScanning: boolean;
   onSend: () => void;
   onToggleRecording: () => void;
+  onReceiptFile: (file: File) => void;
   onGrow: (el: HTMLTextAreaElement) => void;
   t: (key: string) => string;
   locale: string;
 }) {
+  const busy = isSending || isReceiptScanning;
+
   return (
     <div
       className={[
@@ -600,6 +735,21 @@ function ChatInput({
           : "border-[rgb(var(--border))] focus-within:border-[rgb(var(--accent))]",
       ].join(" ")}
     >
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="sr-only"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            onReceiptFile(file);
+            e.target.value = "";
+          }
+        }}
+      />
+
       <textarea
         ref={textareaRef}
         value={input}
@@ -613,7 +763,7 @@ function ChatInput({
             onSend();
           }
         }}
-        placeholder={isRecording ? t("chat.listening") : t("chat.placeholder")}
+        placeholder={isRecording ? t("chat.listening") : isReceiptScanning ? t("chat.scanning") : t("chat.placeholder")}
         rows={1}
         className="flex-1 resize-none bg-transparent text-base leading-relaxed outline-none placeholder:text-[rgb(var(--muted))] sm:text-sm"
         style={{ minHeight: "28px", maxHeight: "160px" }}
@@ -622,8 +772,23 @@ function ChatInput({
       <div className="flex shrink-0 items-center gap-1 pb-0.5">
         <button
           type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={busy || isLoading}
+          title={t("chat.scanReceipt")}
+          className={[
+            "flex h-10 w-10 items-center justify-center rounded-full transition active:scale-95 disabled:pointer-events-none disabled:opacity-40 sm:h-9 sm:w-9",
+            isReceiptScanning
+              ? "text-[rgb(var(--accent))] animate-pulse"
+              : "text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]",
+          ].join(" ")}
+        >
+          <CameraIcon size={18} weight="regular" />
+        </button>
+
+        <button
+          type="button"
           onClick={onToggleRecording}
-          disabled={isSending || isLoading}
+          disabled={busy || isLoading}
           title={isRecording ? t("chat.stopRecording") : t("chat.startRecording")}
           className={[
             "flex h-10 w-10 items-center justify-center rounded-full transition active:scale-95 disabled:pointer-events-none disabled:opacity-40 sm:h-9 sm:w-9",
@@ -641,11 +806,11 @@ function ChatInput({
 
         <button
           onClick={onSend}
-          disabled={isSending || !input.trim() || isLoading}
+          disabled={busy || !input.trim() || isLoading}
           className="flex h-10 w-10 items-center justify-center rounded-full bg-[rgb(var(--foreground))] text-[rgb(var(--background))] transition hover:opacity-80 disabled:opacity-20 active:scale-95 sm:h-9 sm:w-9"
           title={t("chat.enterHint")}
         >
-          {isSending ? (
+          {busy ? (
             <span className="flex gap-0.5">
               {[0, 1, 2].map((i) => (
                 <span
@@ -805,11 +970,231 @@ function ThinkingProcess({
   );
 }
 
+// ─── DisplayType rich blocks ──────────────────────────────────────────────────
+
+type BudgetItem = {
+  id: string;
+  amount: string;
+  currency: string;
+  spent?: number;
+  category?: { name: string; icon?: string | null } | null;
+};
+
+type GoalItem = {
+  id: string;
+  name: string;
+  targetAmount: string;
+  currentAmount: string;
+  currency: string;
+  status: string;
+  deadline?: string | null;
+};
+
+type CategoryStat = { name: string; amount: number; icon?: string | null };
+
+type TxItem = {
+  id: string;
+  type: string;
+  amount: string;
+  currency: string;
+  merchant?: string | null;
+  date: string;
+  category?: { name: string } | null;
+};
+
+function DisplayTypeBlock({ displayType, t, locale }: { displayType: string; t: (k: string) => string; locale: string }) {
+  const { workspace } = useLuca();
+  if (!workspace) return null;
+  if (displayType === "budget_cards") return <BudgetStatusBlock workspaceId={workspace.id} t={t} />;
+  if (displayType === "goals_cards") return <GoalsStatusBlock workspaceId={workspace.id} t={t} />;
+  if (displayType === "chart_bar" || displayType === "chart_line") return <SpendingChartBlock workspaceId={workspace.id} />;
+  if (displayType === "table") return <RecentTxBlock workspaceId={workspace.id} locale={locale} />;
+  return null;
+}
+
+function BudgetStatusBlock({ workspaceId, t }: { workspaceId: string; t: (k: string) => string }) {
+  const [budgets, setBudgets] = useState<BudgetItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const now = new Date();
+
+  useEffect(() => {
+    apiFetch<{ budgets: BudgetItem[] }>(
+      `/api/budget?workspaceId=${workspaceId}&year=${now.getFullYear()}&month=${now.getMonth() + 1}`
+    )
+      .then((r) => setBudgets(r.budgets))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [workspaceId]);
+
+  if (loading) return <div className="text-xs text-[rgb(var(--muted))]">{t("common.loading") || "Loading…"}</div>;
+  if (!budgets.length) return null;
+
+  return (
+    <div className="mt-1 rounded-xl border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] p-3">
+      <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-[rgb(var(--muted))]">{t("chat.budgetStatus")}</p>
+      <div className="space-y-2.5">
+        {budgets.map((b) => {
+          const limit = parseFloat(b.amount);
+          const spent = b.spent ?? 0;
+          const pct = limit > 0 ? Math.min((spent / limit) * 100, 100) : 0;
+          const over = spent > limit;
+          return (
+            <div key={b.id}>
+              <div className="flex items-center justify-between text-xs">
+                <span>{b.category?.icon ? `${b.category.icon} ` : ""}{b.category?.name ?? t("budget.overall")}</span>
+                <span className={over ? "text-[rgb(var(--negative))]" : "text-[rgb(var(--muted))]"}>
+                  {spent.toLocaleString(undefined, { maximumFractionDigits: 0 })} / {limit.toLocaleString(undefined, { maximumFractionDigits: 0 })} {b.currency}
+                </span>
+              </div>
+              <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-[rgb(var(--border))]">
+                <div
+                  className={["h-full rounded-full transition-all", over ? "bg-[rgb(var(--negative))]" : pct >= 80 ? "bg-amber-400" : "bg-[rgb(var(--positive))]"].join(" ")}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function GoalsStatusBlock({ workspaceId, t }: { workspaceId: string; t: (k: string) => string }) {
+  const [goals, setGoals] = useState<GoalItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiFetch<{ goals: GoalItem[] }>(`/api/goals?workspaceId=${workspaceId}`)
+      .then((r) => setGoals(r.goals.filter((g) => g.status === "ACTIVE")))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [workspaceId]);
+
+  if (loading) return <div className="text-xs text-[rgb(var(--muted))]">{t("common.loading") || "Loading…"}</div>;
+  if (!goals.length) return null;
+
+  return (
+    <div className="mt-1 rounded-xl border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] p-3">
+      <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-[rgb(var(--muted))]">{t("chat.goalsProgress")}</p>
+      <div className="space-y-2.5">
+        {goals.map((g) => {
+          const current = parseFloat(g.currentAmount);
+          const target = parseFloat(g.targetAmount);
+          const pct = target > 0 ? Math.min((current / target) * 100, 100) : 0;
+          return (
+            <div key={g.id}>
+              <div className="flex items-center justify-between text-xs">
+                <span>{g.name}</span>
+                <span className="text-[rgb(var(--muted))]">
+                  {current.toLocaleString(undefined, { maximumFractionDigits: 0 })} / {target.toLocaleString(undefined, { maximumFractionDigits: 0 })} {g.currency}
+                </span>
+              </div>
+              <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-[rgb(var(--border))]">
+                <div
+                  className="h-full rounded-full bg-[rgb(var(--accent))] transition-all"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SpendingChartBlock({ workspaceId }: { workspaceId: string }) {
+  const [data, setData] = useState<CategoryStat[]>([]);
+  const [currency, setCurrency] = useState("");
+  const [loading, setLoading] = useState(true);
+  const now = new Date();
+
+  useEffect(() => {
+    apiFetch<{ categoryBreakdown: CategoryStat[]; currency: string }>(
+      `/api/reports/monthly-summary?workspaceId=${workspaceId}&year=${now.getFullYear()}&month=${now.getMonth() + 1}`
+    )
+      .then((r) => {
+        setData(r.categoryBreakdown.slice(0, 8));
+        setCurrency(r.currency);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [workspaceId]);
+
+  if (loading) return null;
+  if (!data.length) return null;
+
+  const max = Math.max(...data.map((d) => d.amount));
+
+  return (
+    <div className="mt-1 rounded-xl border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] p-3">
+      <ResponsiveContainer width="100%" height={Math.max(80, data.length * 28)}>
+        <BarChart data={data} layout="vertical" margin={{ top: 0, right: 48, left: 0, bottom: 0 }}>
+          <XAxis type="number" hide domain={[0, max * 1.05]} />
+          <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+          <Tooltip
+            formatter={(v) => [`${currency} ${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`, ""]}
+            contentStyle={{ fontSize: 11, borderRadius: 8 }}
+          />
+          <Bar dataKey="amount" radius={[0, 4, 4, 0]}>
+            {data.map((_, i) => (
+              <Cell key={i} fill={`hsl(${210 + i * 25}, 70%, 55%)`} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function RecentTxBlock({ workspaceId, locale }: { workspaceId: string; locale: string }) {
+  const [txs, setTxs] = useState<TxItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const dateLocale = locale === "ru" ? "ru-RU" : "en-US";
+
+  useEffect(() => {
+    apiFetch<{ transactions: TxItem[] }>(`/api/transactions?workspaceId=${workspaceId}&limit=8`)
+      .then((r) => setTxs(r.transactions))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [workspaceId]);
+
+  if (loading) return null;
+  if (!txs.length) return null;
+
+  return (
+    <div className="mt-1 overflow-hidden rounded-xl border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))]">
+      {txs.map((tx) => {
+        const isIncome = tx.type === "INCOME";
+        const amt = parseFloat(tx.amount);
+        return (
+          <div key={tx.id} className="flex items-center gap-2 border-b border-[rgb(var(--border-soft))] px-3 py-2 last:border-0">
+            <div className={["flex h-6 w-6 shrink-0 items-center justify-center rounded-full", isIncome ? "bg-[rgb(var(--positive))]/15" : "bg-[rgb(var(--negative))]/15"].join(" ")}>
+              {isIncome
+                ? <ArrowUpIcon size={10} className="text-[rgb(var(--positive))]" />
+                : <ArrowDownIcon size={10} className="text-[rgb(var(--negative))]" />}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-medium">{tx.merchant ?? tx.category?.name ?? tx.type}</p>
+              <p className="text-[10px] text-[rgb(var(--muted))]">{new Date(tx.date).toLocaleDateString(dateLocale, { month: "short", day: "numeric" })}</p>
+            </div>
+            <span className={["text-xs font-medium tabular-nums", isIncome ? "text-[rgb(var(--positive))]" : ""].join(" ")}>
+              {isIncome ? "+" : "-"}{tx.currency} {amt.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Message row ──────────────────────────────────────────────────────────────
 
 function MessageRow({
   message,
   accounts,
+  categories,
   onConfirm,
   onReject,
   onUpdateOverride,
@@ -818,6 +1203,7 @@ function MessageRow({
 }: {
   message: Message;
   accounts: { id: string; name: string; currency: string }[];
+  categories: ChatCategory[];
   onConfirm: (id: string) => void;
   onReject: (id: string) => void;
   onUpdateOverride: (actionId: string, txIndex: number, patch: Partial<TransactionOverride>) => void;
@@ -878,6 +1264,12 @@ function MessageRow({
           </p>
         )}
 
+        {/* DisplayType rich block — shown after streaming ends */}
+        {!message.streaming && message.displayType && !message.action && !message.confirmed && !message.rejected &&
+          !["text", "confirm_transaction", "confirm_operation"].includes(message.displayType) && (
+          <DisplayTypeBlock displayType={message.displayType} t={t} locale={locale} />
+        )}
+
         {/* Pending confirmation */}
         {message.action && (
           <div className="space-y-2">
@@ -898,6 +1290,7 @@ function MessageRow({
                       tx={tx}
                       override={override}
                       accounts={accounts}
+                      categories={categories}
                       onUpdateOverride={(patch) => onUpdateOverride(message.action!.id, idx, patch)}
                       t={t}
                       locale={locale}
@@ -957,6 +1350,7 @@ function TxConfirmCard({
   tx,
   override,
   accounts,
+  categories,
   onUpdateOverride,
   t,
   locale,
@@ -964,6 +1358,7 @@ function TxConfirmCard({
   tx: ParsedTransaction;
   override?: TransactionOverride;
   accounts: { id: string; name: string; currency: string }[];
+  categories: ChatCategory[];
   onUpdateOverride: (patch: Partial<TransactionOverride>) => void;
   t: (key: string) => string;
   locale: string;
@@ -1070,6 +1465,7 @@ function TxConfirmCard({
 
       {isEditing && (
         <div className="border-t border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] p-4 space-y-3">
+          {/* Amount + Currency */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[rgb(var(--muted))]">
@@ -1103,6 +1499,7 @@ function TxConfirmCard({
             </div>
           </div>
 
+          {/* Date + Account */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[rgb(var(--muted))]">
@@ -1127,6 +1524,7 @@ function TxConfirmCard({
             )}
           </div>
 
+          {/* To account (transfer) */}
           {tx.type === "TRANSFER" && accounts.length > 1 && (
             <AccountPicker
               accounts={accounts.filter((a) => a.id !== effectiveAccountId)}
@@ -1135,6 +1533,55 @@ function TxConfirmCard({
               label={locale === "ru" ? "Счёт (куда)" : "To account"}
             />
           )}
+
+          {/* Merchant */}
+          <div>
+            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[rgb(var(--muted))]">
+              {t("transactions.merchantLabel")}
+            </label>
+            <input
+              type="text"
+              value={override?.merchant ?? tx.merchant ?? ""}
+              onChange={(e) => onUpdateOverride({ merchant: e.target.value || null })}
+              placeholder="—"
+              className="h-9 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2.5 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+            />
+          </div>
+
+          {/* Category */}
+          {categories.length > 0 && (
+            <div>
+              <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[rgb(var(--muted))]">
+                {t("transactions.category")}
+              </label>
+              <select
+                value={override?.categoryId ?? ""}
+                onChange={(e) => onUpdateOverride({ categoryId: e.target.value || null })}
+                className="h-9 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+              >
+                <option value="">{t("transactions.noCategory")}</option>
+                {categories
+                  .filter((c) => c.type === tx.type || c.type === "EXPENSE")
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+              </select>
+            </div>
+          )}
+
+          {/* Comment */}
+          <div>
+            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[rgb(var(--muted))]">
+              {t("transactions.comment")}
+            </label>
+            <input
+              type="text"
+              value={override?.comment ?? tx.comment ?? ""}
+              onChange={(e) => onUpdateOverride({ comment: e.target.value || null })}
+              placeholder="—"
+              className="h-9 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2.5 text-sm outline-none transition focus:border-[rgb(var(--accent))]"
+            />
+          </div>
         </div>
       )}
     </div>
@@ -1161,6 +1608,12 @@ function OperationConfirmCard({
       return <BudgetConfirmCard op={op as SetBudgetOp} t={t} locale={locale} />;
     case "CREATE_GOAL":
       return <GoalConfirmCard op={op as CreateGoalOp} t={t} locale={locale} />;
+    case "DELETE_TRANSACTIONS":
+      return <DeleteTxConfirmCard op={op as DeleteTransactionsOp} t={t} />;
+    case "UPDATE_TRANSACTION":
+      return <UpdateTxConfirmCard op={op as UpdateTransactionOp} t={t} locale={locale} />;
+    case "UPDATE_GOAL_PROGRESS":
+      return <UpdateGoalConfirmCard op={op as UpdateGoalProgressOp} t={t} />;
     default:
       return null;
   }
@@ -1208,6 +1661,32 @@ function OperationSavedCard({
           icon={<TargetIcon size={10} weight="bold" />}
           label={t("chat.goalSaved")}
           detail={(op as CreateGoalOp).name}
+        />
+      );
+    case "DELETE_TRANSACTIONS": {
+      const delOp = op as DeleteTransactionsOp;
+      return (
+        <SimpleSavedCard
+          icon={<TrashIcon size={10} weight="bold" />}
+          label={t("chat.txDeleted")}
+          detail={`${delOp.ids.length} ${delOp.ids.length === 1 ? t("chat.transaction") : t("chat.transactions")}`}
+        />
+      );
+    }
+    case "UPDATE_TRANSACTION":
+      return (
+        <SimpleSavedCard
+          icon={<PencilSimpleIcon size={10} weight="bold" />}
+          label={t("chat.txUpdated")}
+          detail={(op as UpdateTransactionOp).id.slice(0, 8) + "…"}
+        />
+      );
+    case "UPDATE_GOAL_PROGRESS":
+      return (
+        <SimpleSavedCard
+          icon={<TargetIcon size={10} weight="bold" />}
+          label={t("chat.goalUpdated")}
+          detail={(op as UpdateGoalProgressOp).goalName}
         />
       );
     default:
@@ -1346,6 +1825,85 @@ function GoalConfirmCard({ op, t, locale }: { op: CreateGoalOp; t: (key: string)
         </div>
         <span className="shrink-0 rounded-full bg-[rgb(var(--surface-soft))] px-2.5 py-0.5 text-xs font-medium text-[rgb(var(--muted))]">
           {t("chat.createGoal")}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function DeleteTxConfirmCard({ op, t }: { op: DeleteTransactionsOp; t: (key: string) => string }) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-[rgb(var(--negative-dim))] bg-[rgb(var(--surface))]">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[rgb(var(--negative-dim))]">
+          <TrashIcon size={16} className="text-[rgb(var(--negative))]" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="font-medium text-[rgb(var(--foreground))]">
+            {op.ids.length} {op.ids.length === 1 ? t("chat.transaction") : t("chat.transactions")}
+          </div>
+          <div className="text-xs text-[rgb(var(--negative))]">{t("chat.willBeDeleted")}</div>
+        </div>
+        <span className="shrink-0 rounded-full bg-[rgb(var(--negative-dim))] px-2.5 py-0.5 text-xs font-medium text-[rgb(var(--negative))]">
+          {t("chat.deleteOp")}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function UpdateTxConfirmCard({
+  op,
+  t,
+  locale,
+}: {
+  op: UpdateTransactionOp;
+  t: (key: string) => string;
+  locale: string;
+}) {
+  const fields = op.fields;
+  const changes: string[] = [];
+  if (fields.amount !== undefined) changes.push(`${t("transactions.amount")}: ${fields.amount}`);
+  if (fields.currency !== undefined) changes.push(`${t("chat.currency")}: ${fields.currency}`);
+  if (fields.merchant !== undefined) changes.push(`${t("transactions.merchantLabel")}: ${fields.merchant ?? "—"}`);
+  if (fields.date !== undefined) changes.push(`${t("transactions.dateLabel")}: ${formatDate(fields.date, locale)}`);
+  if (fields.comment !== undefined) changes.push(`${t("transactions.comment")}: ${fields.comment ?? "—"}`);
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[rgb(var(--surface-soft))]">
+          <PencilSimpleIcon size={16} className="text-[rgb(var(--muted))]" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="font-medium text-[rgb(var(--foreground))]">{t("chat.updateTxTitle")}</div>
+          {changes.length > 0 && (
+            <div className="mt-0.5 text-xs text-[rgb(var(--muted))]">{changes.join(" · ")}</div>
+          )}
+        </div>
+        <span className="shrink-0 rounded-full bg-[rgb(var(--surface-soft))] px-2.5 py-0.5 text-xs font-medium text-[rgb(var(--muted))]">
+          {t("chat.updateOp")}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function UpdateGoalConfirmCard({ op, t }: { op: UpdateGoalProgressOp; t: (key: string) => string }) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[rgb(var(--surface-soft))]">
+          <TargetIcon size={16} className="text-[rgb(var(--muted))]" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="font-medium text-[rgb(var(--foreground))]">{op.goalName}</div>
+          <div className="text-xs text-[rgb(var(--muted))]">
+            {t("chat.newProgress")}: {op.amount.toLocaleString()}
+          </div>
+        </div>
+        <span className="shrink-0 rounded-full bg-[rgb(var(--surface-soft))] px-2.5 py-0.5 text-xs font-medium text-[rgb(var(--muted))]">
+          {t("chat.updateGoalOp")}
         </span>
       </div>
     </div>

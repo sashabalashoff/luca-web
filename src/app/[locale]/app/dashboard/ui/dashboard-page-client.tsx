@@ -10,7 +10,16 @@ import {
   BankIcon,
   PiggyBankIcon,
 } from "@phosphor-icons/react/dist/ssr";
-import { useEffect, useState } from "react";
+import useSWR from "swr";
+import {
+  Bar,
+  BarChart,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 type Summary = {
   income: number;
@@ -48,36 +57,18 @@ const valueColorClass: Record<CardColor, string> = {
 export function DashboardPageClient() {
   const { t } = useI18n();
   const { workspace, accounts, transactionKey } = useLuca();
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
 
-  useEffect(() => {
-    if (!workspace) return;
-    let active = true;
-    async function fetchData() {
-      if (active) { setLoading(true); setLoadError(false); }
-      try {
-        const data = await apiFetch<Summary>(
-          `/api/reports/monthly-summary?workspaceId=${workspace!.id}`
-        );
-        if (active) setSummary(data);
-      } catch (err) {
-        console.error(err);
-        if (active) setLoadError(true);
-      } finally {
-        if (active) setLoading(false);
-      }
-    }
-    fetchData();
-    return () => { active = false; };
-  }, [workspace, transactionKey]);
+  const swrKey = workspace
+    ? `/api/reports/monthly-summary?workspaceId=${workspace.id}&_k=${transactionKey}`
+    : null;
+  const { data: summary, error: swrError, isLoading: loading } = useSWR<Summary>(
+    swrKey,
+    (url: string) => apiFetch<Summary>(url),
+    { revalidateOnFocus: true, dedupingInterval: 30_000 }
+  );
+  const loadError = !!swrError;
 
   const currency = workspace?.baseCurrency ?? "USD";
-  const maxCategory = Math.max(
-    ...(summary?.categoryBreakdown ?? []).map((c) => c.amount),
-    1
-  );
   const netColor: CardColor =
     summary && summary.net >= 0 ? "positive" : "negative";
 
@@ -178,14 +169,7 @@ export function DashboardPageClient() {
 
         <div className="p-5">
           {loading ? (
-            <div className="space-y-5">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="space-y-2">
-                  <div className="h-4 w-28 animate-pulse rounded-md bg-[rgb(var(--surface-soft))]" />
-                  <div className="h-2 animate-pulse rounded-full bg-[rgb(var(--surface-soft))]" />
-                </div>
-              ))}
-            </div>
+            <div className="h-48 animate-pulse rounded-xl bg-[rgb(var(--surface-soft))]" />
           ) : !summary?.categoryBreakdown?.length ? (
             <div className="flex flex-col items-center py-12 text-center">
               <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-[rgb(var(--surface-soft))]">
@@ -194,47 +178,55 @@ export function DashboardPageClient() {
               <p className="text-sm text-[rgb(var(--muted))]">{t("dashboard.noData")}</p>
             </div>
           ) : (
-            <div className="space-y-5">
-              {summary.categoryBreakdown.map((item, idx) => {
-                const pct = Math.round((item.amount / maxCategory) * 100);
-                const totalExpenses = summary.expenses || 1;
-                const share = Math.round((item.amount / totalExpenses) * 100);
-
-                return (
-                  <div key={item.name}>
-                    <div className="mb-2 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        {item.icon ? (
-                          <span className="text-base leading-none">{item.icon}</span>
-                        ) : (
-                          <div
-                            className="h-2 w-2 rounded-full bg-[rgb(var(--accent))]"
-                            style={{ opacity: Math.max(0.3, 1 - idx * 0.12) }}
-                          />
-                        )}
-                        <span className="text-sm font-medium">{item.name}</span>
-                      </div>
-                      <div className="flex items-center gap-3 tabular-nums">
-                        <span className="text-xs text-[rgb(var(--muted))]">{share}%</span>
-                        <span className="text-sm font-semibold text-[rgb(var(--negative))]">
-                          {currency} {fmt(item.amount)}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="h-1.5 overflow-hidden rounded-full bg-[rgb(var(--surface-soft))]">
-                      <div
-                        className="h-full rounded-full transition-all duration-700"
-                        style={{
-                          width: `${pct}%`,
-                          background: `rgb(var(--accent))`,
-                          opacity: Math.max(0.35, 1 - idx * 0.1),
-                        }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <ResponsiveContainer width="100%" height={Math.max(160, summary.categoryBreakdown.length * 36)}>
+              <BarChart
+                data={summary.categoryBreakdown.map((item, idx) => ({
+                  name: (item.icon ? item.icon + " " : "") + item.name,
+                  amount: item.amount,
+                  opacity: Math.max(0.45, 1 - idx * 0.08),
+                }))}
+                layout="vertical"
+                margin={{ top: 0, right: 12, left: 0, bottom: 0 }}
+              >
+                <XAxis
+                  type="number"
+                  tick={{ fontSize: 11, fill: "rgb(var(--muted))" }}
+                  tickFormatter={(v) => `${currency} ${v >= 1000 ? (v / 1000).toFixed(1) + "k" : v}`}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="name"
+                  width={110}
+                  tick={{ fontSize: 12, fill: "rgb(var(--foreground))" }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip
+                  cursor={{ fill: "rgb(var(--surface-soft))" }}
+                  formatter={(value) => [`${currency} ${fmt(Number(value ?? 0))}`, ""]}
+                  contentStyle={{
+                    background: "rgb(var(--surface))",
+                    border: "1px solid rgb(var(--border))",
+                    borderRadius: 10,
+                    fontSize: 12,
+                    color: "rgb(var(--foreground))",
+                  }}
+                  itemStyle={{ color: "rgb(var(--foreground))" }}
+                  labelStyle={{ display: "none" }}
+                />
+                <Bar dataKey="amount" radius={[0, 4, 4, 0]} maxBarSize={22}>
+                  {summary.categoryBreakdown.map((_, idx) => (
+                    <Cell
+                      key={idx}
+                      fill="rgb(var(--accent))"
+                      fillOpacity={Math.max(0.45, 1 - idx * 0.08)}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
           )}
         </div>
       </div>

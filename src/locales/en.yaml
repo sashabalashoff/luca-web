@@ -38,6 +38,7 @@ navigation:
   accounts: "Accounts"
   categories: "Categories"
   budget: "Budget"
+  netWorth: "Net Worth"
   exchangeRates: "Exchange Rates"
 
 chat:
@@ -90,6 +91,26 @@ chat:
   startRecording: "Start voice input"
   stopRecording: "Stop recording"
   currency: "Currency"
+  scanReceipt: "Scan receipt photo"
+  scanning: "Scanning receipt..."
+  loadMore: "Load more chats"
+  receiptNoTransactions: "I couldn't find any transactions in this receipt. Please try a clearer photo."
+  receiptError: "Failed to scan receipt. Please try again."
+  budgetStatus: "Budget status"
+  goalsProgress: "Goals progress"
+  spendingByCategory: "Spending by category"
+  recentTransactions: "Recent transactions"
+  deleteOp: "Delete"
+  updateOp: "Update"
+  updateGoalOp: "Update goal"
+  willBeDeleted: "Will be permanently deleted"
+  updateTxTitle: "Update transaction"
+  newProgress: "New progress"
+  txDeleted: "Deleted"
+  txUpdated: "Updated"
+  goalUpdated: "Goal updated"
+  transaction: "transaction"
+  transactions: "transactions"
 
 dashboard:
   title: "Dashboard"
@@ -126,10 +147,12 @@ transactions:
   allAccounts: "All accounts"
   category: "Category"
   allCategories: "All categories"
+  noCategory: "No category"
   clearFilters: "Clear filters"
   currency: "Currency"
   loadMore: "Load more"
   loadingMore: "Loading..."
+  exportCsv: "Export CSV"
 
 reports:
   title: "Reports"
@@ -142,6 +165,7 @@ reports:
   byCategory: "By category"
   noData: "No data for this period."
   exportCSV: "Export CSV"
+  trend: "6-month trend"
 
 goals:
   title: "Goals"
@@ -161,6 +185,11 @@ goals:
 settings:
   title: "Settings"
   subtitle: "Workspace, accounts and preferences."
+  profile: "Profile"
+  email: "Email"
+  displayName: "Display name"
+  displayNamePlaceholder: "Your name"
+  notSet: "Not set"
   appearance: "Appearance"
   workspace: "Workspace"
   workspaceName: "Name"
@@ -214,7 +243,10 @@ categories:
   editTitle: "Edit category"
   newTitle: "New category"
   subcategories: "subcategories"
-  addSub: "Sub"
+  addSub: "Add sub"
+  sub: "Sub"
+  search: "Search categories..."
+  noResults: "No categories found."
 
 exchangeRates:
   title: "Exchange Rates"
@@ -253,6 +285,15 @@ budget:
   left: "left"
   over: "over"
   currency: "Currency"
+
+netWorth:
+  title: "Net Worth"
+  subtitle: "Your total assets minus liabilities."
+  netWorth: "Net Worth"
+  totalAssets: "Total Assets"
+  totalLiabilities: "Total Liabilities"
+  assets: "Assets"
+  liabilities: "Liabilities"
 
 onboarding:
   title: "Welcome to LUCA"
