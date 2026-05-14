@@ -3,6 +3,7 @@
 import { apiFetch, getAuthToken } from "@/shared/api/client";
 import type {
   AiOperation,
+  AnswerPayload,
   CreateAccountOp,
   CreateCategoriesOp,
   CreateGoalOp,
@@ -18,16 +19,21 @@ import { useLuca } from "@/shared/providers/luca-provider";
 import { AccountPicker } from "@/shared/ui/account-picker";
 import {
   ArrowDownIcon,
+  ArrowClockwiseIcon,
   ArrowUpIcon,
   BankIcon,
   CameraIcon,
   CheckIcon,
+  CopyIcon,
   FolderIcon,
   MicrophoneIcon,
   PencilSimpleIcon,
+  ShareNetworkIcon,
   SlidersIcon,
   StopCircleIcon,
   TargetIcon,
+  ThumbsDownIcon,
+  ThumbsUpIcon,
   TrashIcon,
   XIcon,
 } from "@phosphor-icons/react/dist/ssr";
@@ -80,6 +86,8 @@ type Message = {
   savedOperations?: AiOperation[];
   thinkingSteps?: ThinkingStep[];
   displayType?: string;
+  answerPayload?: AnswerPayload | null;
+  feedback?: "UP" | "DOWN";
 };
 
 const INTRO_ID = "intro";
@@ -189,8 +197,9 @@ export function ChatPageClient() {
       messages: Array<{
         id: string;
         role: string;
-        content: string;
-        action?: {
+          content: string;
+          answerPayload?: AnswerPayload | null;
+          action?: {
           id: string;
           status: string;
           payloadJson: Record<string, unknown>;
@@ -204,6 +213,7 @@ export function ChatPageClient() {
             id: msg.id,
             role: msg.role === "USER" ? "user" : "assistant",
             content: msg.content,
+            answerPayload: msg.answerPayload ?? null,
             action:
               msg.action && msg.action.status === "PENDING" && ops.length > 0
                 ? { id: msg.action.id, status: msg.action.status, operations: ops }
@@ -332,10 +342,11 @@ export function ChatPageClient() {
             const newSessionId = payload.sessionId as string;
             const finalMessage = payload.finalMessage as string | undefined;
             const displayType = payload.displayType as string | undefined;
+            const answerPayload = payload.answerPayload as AnswerPayload | null | undefined;
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsgId
-                  ? { ...m, streaming: false, content: finalMessage ?? m.content, displayType }
+                  ? { ...m, streaming: false, content: finalMessage ?? m.content, displayType, answerPayload }
                   : m
               )
             );
@@ -494,6 +505,26 @@ export function ChatPageClient() {
         )
       );
     }
+  }
+
+  async function sendFeedback(messageId: string, rating: "UP" | "DOWN") {
+    setMessages((prev) =>
+      prev.map((m) => (m.id === messageId ? { ...m, feedback: rating } as Message : m))
+    );
+    try {
+      await apiFetch("/api/ai/chat/feedback", {
+        method: "POST",
+        body: JSON.stringify({ messageId, rating }),
+      });
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  function retryAssistantMessage(messageId: string) {
+    const idx = messages.findIndex((m) => m.id === messageId);
+    const previousUser = [...messages.slice(0, idx)].reverse().find((m) => m.role === "user");
+    if (previousUser) void sendMessage(previousUser.content);
   }
 
   function toggleRecording() {
@@ -655,6 +686,8 @@ export function ChatPageClient() {
                   onConfirm={confirmAction}
                   onReject={rejectAction}
                   onUpdateOverride={updateOverride}
+                  onFeedback={sendFeedback}
+                  onRetry={retryAssistantMessage}
                   t={t}
                   locale={locale}
                 />
@@ -1002,14 +1035,187 @@ type TxItem = {
   category?: { name: string } | null;
 };
 
-function DisplayTypeBlock({ displayType, t, locale }: { displayType: string; t: (k: string) => string; locale: string }) {
+function DisplayTypeBlock({
+  displayType,
+  answerPayload,
+  t,
+  locale,
+}: {
+  displayType: string;
+  answerPayload?: AnswerPayload | null;
+  t: (k: string) => string;
+  locale: string;
+}) {
   const { workspace } = useLuca();
+  if (answerPayload?.widgets?.length) return <AnswerPayloadBlock payload={answerPayload} t={t} locale={locale} />;
   if (!workspace) return null;
   if (displayType === "budget_cards") return <BudgetStatusBlock workspaceId={workspace.id} t={t} />;
   if (displayType === "goals_cards") return <GoalsStatusBlock workspaceId={workspace.id} t={t} />;
   if (displayType === "chart_bar" || displayType === "chart_line") return <SpendingChartBlock workspaceId={workspace.id} />;
   if (displayType === "table") return <RecentTxBlock workspaceId={workspace.id} locale={locale} />;
   return null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function AnswerPayloadBlock({ payload, t, locale }: { payload: AnswerPayload; t: (k: string) => string; locale: string }) {
+  return (
+    <div className="space-y-2">
+      {payload.widgets.map((widget, idx) => {
+        if (widget.type === "transactions_table") {
+          const data = asRecord(widget.data);
+          const rows = asArray(data.transactions) as TxItem[];
+          return <RecentTxList key={idx} txs={rows} locale={locale} />;
+        }
+        if (widget.type === "spending_chart" || widget.type === "cashflow_chart") {
+          const rows = asArray(widget.data).map((item) => {
+            const r = asRecord(item);
+            return {
+              name: String(r.group ?? r.month ?? r.merchant ?? ""),
+              amount: Number.parseFloat(String(r.total ?? r.expenses ?? r.income ?? 0).replace(/,/g, "")) || 0,
+            };
+          }).filter((row) => row.name);
+          return <InlineBarList key={idx} rows={rows} />;
+        }
+        if (widget.type === "budget_cards") {
+          return <BudgetPayloadCards key={idx} rows={asArray(widget.data)} t={t} />;
+        }
+        if (widget.type === "goals_cards") {
+          return <GoalPayloadCards key={idx} rows={asArray(widget.data)} />;
+        }
+        if (widget.type === "account_balances") {
+          const rows = Array.isArray(widget.data)
+            ? widget.data
+            : Object.entries(asRecord(asRecord(widget.data).byType)).map(([account, balance]) => ({ account, balance }));
+          return <AccountBalancePayload key={idx} rows={rows} />;
+        }
+        return null;
+      })}
+    </div>
+  );
+}
+
+function InlineBarList({ rows }: { rows: Array<{ name: string; amount: number }> }) {
+  if (!rows.length) return null;
+  const max = Math.max(...rows.map((r) => r.amount), 1);
+  return (
+    <div className="mt-1 rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] p-3">
+      <div className="space-y-2">
+        {rows.slice(0, 8).map((row) => (
+          <div key={row.name}>
+            <div className="mb-1 flex items-center justify-between gap-3 text-xs">
+              <span className="min-w-0 truncate">{row.name}</span>
+              <span className="shrink-0 tabular-nums text-[rgb(var(--muted))]">{row.amount.toLocaleString()}</span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-[rgb(var(--border))]">
+              <div className="h-full rounded-full bg-[rgb(var(--accent))]" style={{ width: `${Math.max(4, (row.amount / max) * 100)}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RecentTxList({ txs, locale }: { txs: TxItem[]; locale: string }) {
+  if (!txs.length) return null;
+  const dateLocale = locale === "ru" ? "ru-RU" : "en-US";
+  return (
+    <div className="mt-1 overflow-hidden rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))]">
+      {txs.slice(0, 8).map((tx, idx) => {
+        const isIncome = tx.type === "INCOME";
+        const amount = Number.parseFloat(String(tx.amount).replace(/,/g, ""));
+        return (
+          <div key={tx.id ?? idx} className="flex items-center gap-2 border-b border-[rgb(var(--border-soft))] px-3 py-2 last:border-0">
+            <div className={["flex h-6 w-6 shrink-0 items-center justify-center rounded-full", isIncome ? "bg-[rgb(var(--positive))]/15" : "bg-[rgb(var(--negative))]/15"].join(" ")}>
+              {isIncome ? <ArrowUpIcon size={10} className="text-[rgb(var(--positive))]" /> : <ArrowDownIcon size={10} className="text-[rgb(var(--negative))]" />}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-medium">{tx.merchant ?? tx.category?.name ?? tx.type}</p>
+              <p className="text-[10px] text-[rgb(var(--muted))]">{new Date(tx.date).toLocaleDateString(dateLocale, { month: "short", day: "numeric" })}</p>
+            </div>
+            <span className={["text-xs font-medium tabular-nums", isIncome ? "text-[rgb(var(--positive))]" : ""].join(" ")}>
+              {isIncome ? "+" : "-"}{tx.currency} {Number.isFinite(amount) ? amount.toLocaleString(undefined, { maximumFractionDigits: 2 }) : tx.amount}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function BudgetPayloadCards({ rows, t }: { rows: unknown[]; t: (k: string) => string }) {
+  if (!rows.length) return null;
+  return (
+    <div className="mt-1 rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] p-3">
+      <p className="mb-2 text-[11px] font-medium uppercase text-[rgb(var(--muted))]">{t("chat.budgetStatus")}</p>
+      <div className="space-y-2">
+        {rows.map((item, idx) => {
+          const row = asRecord(item);
+          const pct = Number(row.pctUsed ?? 0);
+          return (
+            <div key={idx}>
+              <div className="flex items-center justify-between text-xs">
+                <span>{String(row.category ?? "")}</span>
+                <span className="text-[rgb(var(--muted))]">{String(row.spent ?? "0")} / {String(row.limit ?? "0")}</span>
+              </div>
+              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[rgb(var(--border))]">
+                <div className="h-full rounded-full bg-[rgb(var(--accent))]" style={{ width: `${Math.min(100, pct)}%` }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function GoalPayloadCards({ rows }: { rows: unknown[] }) {
+  if (!rows.length) return null;
+  return (
+    <div className="mt-1 rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] p-3">
+      <div className="space-y-2">
+        {rows.map((item, idx) => {
+          const row = asRecord(item);
+          const pct = Number(row.pct ?? 0);
+          return (
+            <div key={idx}>
+              <div className="flex items-center justify-between text-xs">
+                <span>{String(row.name ?? "")}</span>
+                <span className="text-[rgb(var(--muted))]">{String(row.current ?? "0")} / {String(row.target ?? "0")} {String(row.currency ?? "")}</span>
+              </div>
+              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[rgb(var(--border))]">
+                <div className="h-full rounded-full bg-[rgb(var(--positive))]" style={{ width: `${Math.min(100, pct)}%` }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function AccountBalancePayload({ rows }: { rows: unknown[] }) {
+  if (!rows.length) return null;
+  return (
+    <div className="mt-1 overflow-hidden rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))]">
+      {rows.map((item, idx) => {
+        const row = asRecord(item);
+        return (
+          <div key={idx} className="flex items-center justify-between border-b border-[rgb(var(--border-soft))] px-3 py-2 text-xs last:border-0">
+            <span>{String(row.account ?? row.name ?? "Account")}</span>
+            <span className="font-medium tabular-nums">{String(row.balance ?? row.total ?? "")} {String(row.currency ?? "")}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function BudgetStatusBlock({ workspaceId, t }: { workspaceId: string; t: (k: string) => string }) {
@@ -1198,6 +1404,8 @@ function MessageRow({
   onConfirm,
   onReject,
   onUpdateOverride,
+  onFeedback,
+  onRetry,
   t,
   locale,
 }: {
@@ -1207,6 +1415,8 @@ function MessageRow({
   onConfirm: (id: string) => void;
   onReject: (id: string) => void;
   onUpdateOverride: (actionId: string, txIndex: number, patch: Partial<TransactionOverride>) => void;
+  onFeedback: (messageId: string, rating: "UP" | "DOWN") => void;
+  onRetry: (messageId: string) => void;
   t: (key: string) => string;
   locale: string;
 }) {
@@ -1265,9 +1475,9 @@ function MessageRow({
         )}
 
         {/* DisplayType rich block — shown after streaming ends */}
-        {!message.streaming && message.displayType && !message.action && !message.confirmed && !message.rejected &&
-          !["text", "confirm_transaction", "confirm_operation"].includes(message.displayType) && (
-          <DisplayTypeBlock displayType={message.displayType} t={t} locale={locale} />
+        {!message.streaming && (message.answerPayload || message.displayType) && !message.action && !message.confirmed && !message.rejected &&
+          (message.answerPayload || !["text", "confirm_transaction", "confirm_operation"].includes(message.displayType ?? "text")) && (
+          <DisplayTypeBlock displayType={message.displayType ?? "text"} answerPayload={message.answerPayload} t={t} locale={locale} />
         )}
 
         {/* Pending confirmation */}
@@ -1337,7 +1547,77 @@ function MessageRow({
             {t("chat.rejected")}
           </div>
         )}
+
+        {!message.streaming && message.content && (
+          <MessageToolbar
+            message={message}
+            onFeedback={onFeedback}
+            onRetry={onRetry}
+            t={t}
+          />
+        )}
       </div>
+    </div>
+  );
+}
+
+function MessageToolbar({
+  message,
+  onFeedback,
+  onRetry,
+  t,
+}: {
+  message: Message;
+  onFeedback: (messageId: string, rating: "UP" | "DOWN") => void;
+  onRetry: (messageId: string) => void;
+  t: (key: string) => string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  async function copyMessage() {
+    await navigator.clipboard?.writeText(message.content);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1200);
+  }
+
+  async function shareMessage() {
+    if (navigator.share) {
+      await navigator.share({ text: message.content });
+      return;
+    }
+    await copyMessage();
+  }
+
+  const buttonClass =
+    "flex h-7 w-7 items-center justify-center rounded-md text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]";
+
+  return (
+    <div className="flex items-center gap-1 pt-1 opacity-80">
+      <button type="button" onClick={copyMessage} className={buttonClass} title={copied ? t("chat.copied") : t("chat.copy")}>
+        <CopyIcon size={13} />
+      </button>
+      <button type="button" onClick={shareMessage} className={buttonClass} title={t("chat.share")}>
+        <ShareNetworkIcon size={13} />
+      </button>
+      <button type="button" onClick={() => onRetry(message.id)} className={buttonClass} title={t("chat.retry")}>
+        <ArrowClockwiseIcon size={13} />
+      </button>
+      <button
+        type="button"
+        onClick={() => onFeedback(message.id, "UP")}
+        className={[buttonClass, message.feedback === "UP" ? "bg-[rgb(var(--positive-dim))] text-[rgb(var(--positive))]" : ""].join(" ")}
+        title={t("chat.goodResponse")}
+      >
+        <ThumbsUpIcon size={13} />
+      </button>
+      <button
+        type="button"
+        onClick={() => onFeedback(message.id, "DOWN")}
+        className={[buttonClass, message.feedback === "DOWN" ? "bg-[rgb(var(--negative-dim))] text-[rgb(var(--negative))]" : ""].join(" ")}
+        title={t("chat.badResponse")}
+      >
+        <ThumbsDownIcon size={13} />
+      </button>
     </div>
   );
 }

@@ -111,6 +111,12 @@ chat:
   goalUpdated: "Цель обновлена"
   transaction: "транзакция"
   transactions: "транзакций"
+  copy: "Копировать"
+  copied: "Скопировано"
+  share: "Поделиться"
+  retry: "Повторить"
+  goodResponse: "Хороший ответ"
+  badResponse: "Плохой ответ"
 
 dashboard:
   title: "Дашборд"

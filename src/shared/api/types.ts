@@ -152,6 +152,22 @@ export type AiAction = {
   };
 };
 
+export type AnswerWidget = {
+  type:
+    | "transactions_table"
+    | "spending_chart"
+    | "cashflow_chart"
+    | "budget_cards"
+    | "goals_cards"
+    | "account_balances";
+  title?: string | null;
+  data: unknown;
+};
+
+export type AnswerPayload = {
+  widgets: AnswerWidget[];
+};
+
 // ─── Reports ────────────────────────────────────────────────────────────────
 
 export type MonthlySummary = {

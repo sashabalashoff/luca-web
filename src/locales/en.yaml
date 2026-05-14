@@ -111,6 +111,12 @@ chat:
   goalUpdated: "Goal updated"
   transaction: "transaction"
   transactions: "transactions"
+  copy: "Copy"
+  copied: "Copied"
+  share: "Share"
+  retry: "Retry"
+  goodResponse: "Good response"
+  badResponse: "Bad response"
 
 dashboard:
   title: "Dashboard"
