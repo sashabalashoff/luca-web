@@ -39,6 +39,7 @@ import {
 } from "@phosphor-icons/react/dist/ssr";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import {
   Bar,
   BarChart,
@@ -69,6 +70,16 @@ type ChatAction = {
   overrides?: TransactionOverride[];
 };
 
+type StatementSummary = {
+  count: number;
+  periodFrom: string | null;
+  periodTo: string | null;
+  accountName: string | null;
+  totalIncome: number;
+  totalExpenses: number;
+  currency: string;
+};
+
 type ThinkingStep = {
   tool: string;
   phase: "pending" | "done";
@@ -82,12 +93,16 @@ type Message = {
   confirmed?: boolean;
   confirmedActionId?: string;
   rejected?: boolean;
+  saving?: boolean;
   streaming?: boolean;
   savedOperations?: AiOperation[];
   thinkingSteps?: ThinkingStep[];
   displayType?: string;
   answerPayload?: AnswerPayload | null;
   feedback?: "UP" | "DOWN";
+  importSummary?: StatementSummary | null;
+  saveProgress?: { done: number; total: number } | null;
+  saveProgressStopped?: { done: number; total: number } | null;
 };
 
 const INTRO_ID = "intro";
@@ -133,6 +148,7 @@ export function ChatPageClient() {
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [isReceiptScanning, setIsReceiptScanning] = useState(false);
+  const [isStatementImporting, setIsStatementImporting] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
 
@@ -147,6 +163,8 @@ export function ChatPageClient() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
+  const importAbortRef = useRef<AbortController | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
   const voiceBaseRef = useRef("");
@@ -221,7 +239,8 @@ export function ChatPageClient() {
       })
       .catch(console.error)
       .finally(() => setHistoryLoading(false));
-  }, [sessionId, workspace]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, workspace?.id]);
 
   function growTextarea(el: HTMLTextAreaElement) {
     el.style.height = "auto";
@@ -388,6 +407,8 @@ export function ChatPageClient() {
       const fd = new FormData();
       fd.append("file", file);
       fd.append("workspaceId", workspace.id);
+      fd.append("locale", locale);
+      if (sessionId) fd.append("sessionId", sessionId);
 
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/ai/receipt`, {
         method: "POST",
@@ -439,6 +460,89 @@ export function ChatPageClient() {
     }
   }
 
+  async function importStatement(file: File) {
+    if (!workspace || isStatementImporting) return;
+    setIsStatementImporting(true);
+
+    const userMsgId = crypto.randomUUID();
+    const assistantMsgId = crypto.randomUUID();
+
+    setMessages((prev) => [
+      ...prev.filter((m) => m.id !== INTRO_ID),
+      { id: userMsgId, role: "user", content: `📄 ${file.name}` },
+      { id: assistantMsgId, role: "assistant", content: "", streaming: true },
+    ]);
+
+    try {
+      const token = await getAuthToken();
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("workspaceId", workspace.id);
+      fd.append("locale", locale);
+      if (sessionId) fd.append("sessionId", sessionId);
+
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/ai/import-statement`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: fd,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: { message?: string } };
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId
+              ? { ...m, content: err.error?.message ?? (locale === "ru" ? "Не удалось прочитать выписку." : "Failed to read the statement."), streaming: false }
+              : m
+          )
+        );
+        return;
+      }
+
+      const data = await res.json() as {
+        actionId: string | null;
+        operations: AiOperation[];
+        summary: StatementSummary;
+        message: string;
+      };
+
+      if (!data.actionId || !data.operations?.length) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId
+              ? { ...m, content: locale === "ru" ? "Транзакции в выписке не найдены." : "No transactions found in the statement.", streaming: false }
+              : m
+          )
+        );
+        return;
+      }
+
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantMsgId
+            ? {
+              ...m,
+              content: "",
+              streaming: false,
+              action: { id: data.actionId!, status: "PENDING", operations: data.operations },
+              importSummary: data.summary,
+            }
+            : m
+        )
+      );
+    } catch {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantMsgId
+            ? { ...m, content: locale === "ru" ? "Ошибка при загрузке выписки." : "Error importing statement.", streaming: false }
+            : m
+        )
+      );
+    } finally {
+      setIsStatementImporting(false);
+    }
+  }
+
   async function confirmAction(actionId: string) {
     const msg = messages.find((m) => m.action?.id === actionId);
     const action = msg?.action;
@@ -471,13 +575,101 @@ export function ChatPageClient() {
       };
     });
 
+    // Show saving spinner while API call is in progress (keep action visible)
     setMessages((prev) =>
-      prev.map((m) =>
-        m.action?.id === actionId
-          ? { ...m, confirmed: true, confirmedActionId: actionId, action: null, savedOperations }
-          : m
-      )
+      prev.map((m) => m.action?.id === actionId ? { ...m, saving: true } : m)
     );
+
+    // Use streaming endpoint for statement imports so we can show progress
+    if (msg?.importSummary) {
+      const controller = new AbortController();
+      importAbortRef.current = controller;
+      let lastProgress: { done: number; total: number } | null = null;
+
+      try {
+        const token = await getAuthToken();
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL}/api/ai/actions/${actionId}/confirm-stream`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ accountId: defaultAccount?.id ?? null }),
+            signal: controller.signal,
+          }
+        );
+
+        if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop()!;
+
+          for (const part of parts) {
+            if (!part.startsWith("data:")) continue;
+            const dataStr = part.slice(5).trim();
+            let evt: Record<string, unknown>;
+            try { evt = JSON.parse(dataStr); } catch { continue; }
+
+            if (evt.error) throw new Error(String(evt.error));
+
+            const done2 = evt.done as number | undefined;
+            const total = evt.total as number | undefined;
+            if (done2 !== undefined && total !== undefined) {
+              lastProgress = { done: done2, total };
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.action?.id === actionId
+                    ? { ...m, saveProgress: { done: done2, total } }
+                    : m
+                )
+              );
+            }
+
+            if (evt.finished) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.action?.id === actionId
+                    ? { ...m, confirmed: true, confirmedActionId: actionId, saving: false, saveProgress: null, action: null, savedOperations }
+                    : m
+                )
+              );
+              reload();
+            }
+          }
+        }
+      } catch (err) {
+        const wasAborted = err instanceof Error && err.name === "AbortError";
+        if (wasAborted && lastProgress) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.action?.id === actionId
+                ? { ...m, confirmed: true, confirmedActionId: actionId, saving: false, saveProgress: null, saveProgressStopped: lastProgress, action: null, savedOperations: [] }
+                : m
+            )
+          );
+          reload();
+        } else {
+          console.error(err);
+          setMessages((prev) =>
+            prev.map((m) => m.action?.id === actionId ? { ...m, saving: false, saveProgress: null } : m)
+          );
+        }
+      } finally {
+        importAbortRef.current = null;
+      }
+      return;
+    }
 
     try {
       await apiFetch(`/api/ai/actions/${actionId}/confirm`, {
@@ -487,16 +679,18 @@ export function ChatPageClient() {
           transactionOverrides: overrides,
         }),
       });
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.action?.id === actionId
+            ? { ...m, confirmed: true, confirmedActionId: actionId, saving: false, action: null, savedOperations }
+            : m
+        )
+      );
       reload();
     } catch (err) {
       console.error(err);
-      // Rollback by stable actionId rather than by reference equality
       setMessages((prev) =>
-        prev.map((m) =>
-          m.confirmedActionId === actionId
-            ? { ...m, confirmed: false, confirmedActionId: undefined, action, savedOperations: undefined }
-            : m
-        )
+        prev.map((m) => m.action?.id === actionId ? { ...m, saving: false } : m)
       );
     }
   }
@@ -602,6 +796,10 @@ export function ChatPageClient() {
     }
   }
 
+  function stopImport() {
+    importAbortRef.current?.abort();
+  }
+
   function updateOverride(actionId: string, txIndex: number, patch: Partial<TransactionOverride>) {
     setMessages((prev) =>
       prev.map((m) => {
@@ -635,15 +833,18 @@ export function ChatPageClient() {
             <ChatInput
               textareaRef={textareaRef}
               fileInputRef={fileInputRef}
+              pdfInputRef={pdfInputRef}
               input={input}
               setInput={setInput}
               isSending={isSending}
               isLoading={isLoading}
               isRecording={isRecording}
               isReceiptScanning={isReceiptScanning}
+              isStatementImporting={isStatementImporting}
               onSend={() => sendMessage()}
               onToggleRecording={toggleRecording}
               onReceiptFile={scanReceipt}
+              onStatementFile={importStatement}
               onGrow={growTextarea}
               t={t}
             />
@@ -678,6 +879,7 @@ export function ChatPageClient() {
                   categories={categories}
                   onConfirm={confirmAction}
                   onReject={rejectAction}
+                  onStop={stopImport}
                   onUpdateOverride={updateOverride}
                   onFeedback={sendFeedback}
                   onRetry={retryAssistantMessage}
@@ -697,15 +899,18 @@ export function ChatPageClient() {
             <ChatInput
               textareaRef={textareaRef}
               fileInputRef={fileInputRef}
+              pdfInputRef={pdfInputRef}
               input={input}
               setInput={setInput}
               isSending={isSending}
               isLoading={isLoading}
               isRecording={isRecording}
               isReceiptScanning={isReceiptScanning}
+              isStatementImporting={isStatementImporting}
               onSend={() => sendMessage()}
               onToggleRecording={toggleRecording}
               onReceiptFile={scanReceipt}
+              onStatementFile={importStatement}
               onGrow={growTextarea}
               t={t}
             />
@@ -721,33 +926,39 @@ export function ChatPageClient() {
 function ChatInput({
   textareaRef,
   fileInputRef,
+  pdfInputRef,
   input,
   setInput,
   isSending,
   isLoading,
   isRecording,
   isReceiptScanning,
+  isStatementImporting,
   onSend,
   onToggleRecording,
   onReceiptFile,
+  onStatementFile,
   onGrow,
   t,
 }: {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
+  pdfInputRef: React.RefObject<HTMLInputElement | null>;
   input: string;
   setInput: (v: string) => void;
   isSending: boolean;
   isLoading: boolean;
   isRecording: boolean;
   isReceiptScanning: boolean;
+  isStatementImporting: boolean;
   onSend: () => void;
   onToggleRecording: () => void;
   onReceiptFile: (file: File) => void;
+  onStatementFile: (file: File) => void;
   onGrow: (el: HTMLTextAreaElement) => void;
   t: (key: string) => string;
 }) {
-  const busy = isSending || isReceiptScanning;
+  const busy = isSending || isReceiptScanning || isStatementImporting;
 
   return (
     <div
@@ -768,6 +979,19 @@ function ChatInput({
           const file = e.target.files?.[0];
           if (file) {
             onReceiptFile(file);
+            e.target.value = "";
+          }
+        }}
+      />
+      <input
+        ref={pdfInputRef}
+        type="file"
+        accept="application/pdf,.pdf"
+        className="sr-only"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            onStatementFile(file);
             e.target.value = "";
           }
         }}
@@ -806,6 +1030,21 @@ function ChatInput({
           ].join(" ")}
         >
           <CameraIcon size={18} weight="regular" />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => pdfInputRef.current?.click()}
+          disabled={busy || isLoading}
+          title={t("chat.importStatement")}
+          className={[
+            "flex h-10 w-10 items-center justify-center rounded-full transition active:scale-95 disabled:pointer-events-none disabled:opacity-40 sm:h-9 sm:w-9",
+            isStatementImporting
+              ? "text-[rgb(var(--accent))] animate-pulse"
+              : "text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]",
+          ].join(" ")}
+        >
+          <BankIcon size={18} weight="regular" />
         </button>
 
         <button
@@ -1393,6 +1632,7 @@ function MessageRow({
   categories,
   onConfirm,
   onReject,
+  onStop,
   onUpdateOverride,
   onFeedback,
   onRetry,
@@ -1404,6 +1644,7 @@ function MessageRow({
   categories: ChatCategory[];
   onConfirm: (id: string) => void;
   onReject: (id: string) => void;
+  onStop: () => void;
   onUpdateOverride: (actionId: string, txIndex: number, patch: Partial<TransactionOverride>) => void;
   onFeedback: (messageId: string, rating: "UP" | "DOWN") => void;
   onRetry: (messageId: string) => void;
@@ -1413,7 +1654,7 @@ function MessageRow({
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[78%] rounded-2xl rounded-br-sm bg-[rgb(var(--foreground))] px-4 py-2.5 text-sm leading-relaxed text-[rgb(var(--background))] sm:max-w-[72%]">
+        <div className="max-w-[78%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-[rgb(var(--foreground))] px-4 py-2.5 text-sm leading-relaxed text-[rgb(var(--background))] sm:max-w-[72%]">
           {message.content}
         </div>
       </div>
@@ -1456,12 +1697,12 @@ function MessageRow({
         )}
 
         {message.content && (
-          <p className="whitespace-pre-wrap text-sm leading-relaxed text-[rgb(var(--foreground))]">
-            {message.content}
+          <div className="chat-md text-sm leading-relaxed text-[rgb(var(--foreground))]">
+            <ReactMarkdown>{message.content}</ReactMarkdown>
             {message.streaming && (
               <span className="ml-0.5 inline-block h-[13px] w-[2px] animate-pulse bg-[rgb(var(--foreground))] align-middle" />
             )}
-          </p>
+          </div>
         )}
 
         {/* DisplayType rich block — shown after streaming ends */}
@@ -1470,8 +1711,21 @@ function MessageRow({
             <DisplayTypeBlock displayType={message.displayType ?? "text"} answerPayload={message.answerPayload} t={t} locale={locale} />
           )}
 
+        {/* Bank statement import summary — single confirm card for bulk import */}
+        {message.action && message.importSummary && (
+          <StatementImportCard
+            summary={message.importSummary}
+            onConfirm={() => onConfirm(message.action!.id)}
+            onReject={() => onReject(message.action!.id)}
+            onStop={onStop}
+            saving={!!message.saving}
+            saveProgress={message.saveProgress ?? null}
+            t={t}
+          />
+        )}
+
         {/* Pending confirmation */}
-        {message.action && (
+        {message.action && !message.importSummary && (
           <div className="space-y-2">
             {message.action.operations.length > 1 && (
               <p className="text-xs font-medium text-[rgb(var(--muted))]">
@@ -1504,15 +1758,23 @@ function MessageRow({
             })}
             <div className="flex gap-2 pt-1">
               <button
-                onClick={() => onConfirm(message.action!.id)}
-                className="flex h-10 items-center gap-2 rounded-xl bg-[rgb(var(--foreground))] px-4 text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85 active:scale-[0.98] sm:h-9"
+                onClick={() => !message.saving && onConfirm(message.action!.id)}
+                disabled={!!message.saving}
+                className="flex h-10 items-center gap-2 rounded-xl bg-[rgb(var(--foreground))] px-4 text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:h-9"
               >
-                <CheckIcon size={12} weight="bold" />
-                {message.action.operations.length > 1 ? t("chat.confirmAll") : t("chat.confirmAndSave")}
+                {message.saving ? (
+                  <ArrowClockwiseIcon size={12} className="animate-spin" />
+                ) : (
+                  <CheckIcon size={12} weight="bold" />
+                )}
+                {message.saving
+                  ? (t("common.loading") || "Saving…")
+                  : message.action.operations.length > 1 ? t("chat.confirmAll") : t("chat.confirmAndSave")}
               </button>
               <button
                 onClick={() => onReject(message.action!.id)}
-                className="flex h-10 items-center gap-2 rounded-xl border border-[rgb(var(--border))] px-4 text-sm text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] active:scale-[0.98] sm:h-9"
+                disabled={!!message.saving}
+                className="flex h-10 items-center gap-2 rounded-xl border border-[rgb(var(--border))] px-4 text-sm text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 sm:h-9"
               >
                 <XIcon size={12} />
                 {t("chat.reject")}
@@ -1521,13 +1783,32 @@ function MessageRow({
           </div>
         )}
 
-        {/* Confirmed */}
-        {message.confirmed && message.savedOperations && message.savedOperations.length > 0 && (
-          <div className="space-y-1.5">
-            {message.savedOperations.map((op, i) => (
-              <OperationSavedCard key={i} op={op} t={t} locale={locale} />
-            ))}
-          </div>
+        {/* Confirmed — partial stop */}
+        {message.confirmed && message.saveProgressStopped && message.importSummary && (
+          <StatementStoppedCard
+            progress={message.saveProgressStopped}
+            summary={message.importSummary}
+            t={t}
+            locale={locale}
+          />
+        )}
+
+        {/* Confirmed — full import */}
+        {message.confirmed && !message.saveProgressStopped && message.savedOperations && message.savedOperations.length > 0 && (
+          message.importSummary ? (
+            <StatementSavedCard
+              operations={message.savedOperations}
+              summary={message.importSummary}
+              t={t}
+              locale={locale}
+            />
+          ) : (
+            <div className="space-y-1.5">
+              {message.savedOperations.map((op, i) => (
+                <OperationSavedCard key={i} op={op} t={t} locale={locale} />
+              ))}
+            </div>
+          )
         )}
 
         {/* Rejected */}
@@ -1634,6 +1915,7 @@ function TxConfirmCard({
   locale: string;
 }) {
   const [isEditing, setIsEditing] = useState(false);
+  const [showItems, setShowItems] = useState(false);
   const [accountEquivalent, setAccountEquivalent] = useState<string | null>(null);
 
   const effectiveAmount = override?.amount ?? tx.amount;
@@ -1703,6 +1985,18 @@ function TxConfirmCard({
           {tx.categoryName && (
             <div className="text-xs text-[rgb(var(--muted))]">{tx.categoryName}</div>
           )}
+          {tx.tags && tx.tags.length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {tx.tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-full bg-[rgb(var(--surface-soft))] border border-[rgb(var(--border-soft))] px-2 py-0.5 text-[10px] text-[rgb(var(--muted))]"
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <span className={["rounded-full px-2.5 py-0.5 text-xs font-medium", badgeBg].join(" ")}>
@@ -1731,7 +2025,40 @@ function TxConfirmCard({
         )}
         <span className="opacity-40">·</span>
         <span>{Math.round(tx.confidence * 100)}% {t("chat.confidence")}</span>
+        {tx.items && tx.items.length > 0 && (
+          <>
+            <span className="opacity-40">·</span>
+            <button
+              type="button"
+              onClick={() => setShowItems((v) => !v)}
+              className="flex items-center gap-1 underline-offset-2 hover:underline"
+            >
+              {showItems ? t("chat.hideItems") : `${t("chat.showItems")} (${tx.items.length})`}
+            </button>
+          </>
+        )}
       </div>
+
+      {showItems && tx.items && tx.items.length > 0 && (
+        <div className="border-t border-[rgb(var(--border-soft))] px-4 py-2.5 space-y-1">
+          {tx.items.map((item, i) => (
+            <div key={i} className="flex items-baseline justify-between gap-2 text-[11px]">
+              <span className="min-w-0 truncate text-[rgb(var(--foreground))]">
+                {item.quantity && item.quantity !== 1 ? `${item.quantity}× ` : ""}{item.name}
+              </span>
+              <span className="shrink-0 tabular-nums text-[rgb(var(--muted))]">
+                {item.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
+          ))}
+          <div className="flex items-baseline justify-between gap-2 border-t border-[rgb(var(--border-soft))] pt-1.5 text-[11px] font-semibold">
+            <span className="text-[rgb(var(--muted))]">{t("chat.itemsTotal")}</span>
+            <span className="tabular-nums">
+              {effectiveAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {effectiveCurrency}
+            </span>
+          </div>
+        </div>
+      )}
 
       {isEditing && (
         <div className="border-t border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] p-4 space-y-3">
@@ -2218,6 +2545,18 @@ function TxSavedCard({
             .filter(Boolean)
             .join(" · ")}
         </div>
+        {tx.tags && tx.tags.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {tx.tags.map((tag) => (
+              <span
+                key={tag}
+                className="rounded-full bg-[rgb(var(--surface-soft))] border border-[rgb(var(--border-soft))] px-1.5 py-px text-[9px] text-[rgb(var(--muted))]"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
       <span className="shrink-0 text-xs font-medium text-[rgb(var(--positive))]">
         {t("chat.saved")}
@@ -2244,6 +2583,243 @@ function SimpleSavedCard({
         <div className="truncate text-sm font-medium text-[rgb(var(--foreground))]">{detail}</div>
       </div>
       <span className="shrink-0 text-xs font-medium text-[rgb(var(--positive))]">{label}</span>
+    </div>
+  );
+}
+
+// ─── Bank statement import / saved cards ──────────────────────────────────────
+
+function fmtStatementDate(iso: string, locale: string) {
+  try {
+    return new Date(iso + "T00:00:00").toLocaleDateString(locale === "ru" ? "ru-RU" : "en-US", {
+      day: "numeric", month: "short", year: "numeric",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function fmtStatementAmount(n: number, currency: string) {
+  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " " + currency;
+}
+
+function StatementImportCard({
+  summary,
+  onConfirm,
+  onReject,
+  onStop,
+  saving,
+  saveProgress,
+  t,
+}: {
+  summary: StatementSummary;
+  onConfirm: () => void;
+  onReject: () => void;
+  onStop: () => void;
+  saving: boolean;
+  saveProgress: { done: number; total: number } | null;
+  t: (key: string) => string;
+}) {
+  const R = 16;
+  const circumference = 2 * Math.PI * R;
+  const progress = saveProgress && saveProgress.total > 0 ? saveProgress.done / saveProgress.total : 0;
+  const offset = circumference * (1 - progress);
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-[rgb(var(--border-soft))] px-4 py-3">
+        <div className="flex items-center gap-2">
+          <BankIcon size={14} weight="bold" className="shrink-0 text-[rgb(var(--accent))]" />
+          <span className="text-sm font-semibold">{t("chat.statementImportTitle")}</span>
+        </div>
+        <span className="text-xs text-[rgb(var(--muted))]">
+          <span className="font-semibold tabular-nums text-[rgb(var(--foreground))]">{summary.count}</span>
+          {" "}{t("chat.statementTransactions")}
+        </span>
+      </div>
+
+      {/* Stats */}
+      <div className="px-4 py-3 space-y-2.5">
+        {summary.periodFrom && summary.periodTo && (
+          <p className="text-xs text-[rgb(var(--muted))]">
+            {fmtStatementDate(summary.periodFrom, "ru")} — {fmtStatementDate(summary.periodTo, "ru")}
+          </p>
+        )}
+        <div className="grid grid-cols-2 gap-2">
+          {summary.totalIncome > 0 && (
+            <div className="rounded-xl bg-[rgb(var(--positive-dim))] px-3 py-2.5">
+              <p className="mb-1 text-[10px] font-medium text-[rgb(var(--positive))]">{t("chat.statementIncome")}</p>
+              <p className="text-sm font-semibold tabular-nums leading-tight text-[rgb(var(--positive))]">
+                +{fmtStatementAmount(summary.totalIncome, summary.currency)}
+              </p>
+            </div>
+          )}
+          {summary.totalExpenses > 0 && (
+            <div className="rounded-xl bg-[rgb(var(--negative-dim))] px-3 py-2.5">
+              <p className="mb-1 text-[10px] font-medium text-[rgb(var(--negative))]">{t("chat.statementExpenses")}</p>
+              <p className="text-sm font-semibold tabular-nums leading-tight text-[rgb(var(--negative))]">
+                −{fmtStatementAmount(summary.totalExpenses, summary.currency)}
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Actions / saving */}
+      <div className="border-t border-[rgb(var(--border-soft))] px-4 py-3">
+        {saving ? (
+          <div className="flex items-center gap-3">
+            {/* SVG circular progress ring */}
+            <svg width="40" height="40" className="shrink-0 -rotate-90">
+              <circle cx="20" cy="20" r={R} fill="none" stroke="rgb(var(--border))" strokeWidth="3" />
+              <circle
+                cx="20" cy="20" r={R}
+                fill="none"
+                stroke="rgb(var(--accent))"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeDasharray={circumference}
+                strokeDashoffset={offset}
+                style={{ transition: "stroke-dashoffset 0.35s ease" }}
+              />
+            </svg>
+            <div className="flex-1">
+              <p className="text-sm font-medium text-[rgb(var(--foreground))]">
+                {saveProgress ? `${saveProgress.done} / ${saveProgress.total}` : t("chat.statementSaving")}
+              </p>
+              <p className="text-xs text-[rgb(var(--muted))]">{t("chat.statementSaving")}</p>
+            </div>
+            <button
+              onClick={onStop}
+              className="shrink-0 rounded-lg border border-[rgb(var(--border))] px-3 py-1.5 text-xs font-medium text-[rgb(var(--muted))] transition hover:border-[rgb(var(--negative))] hover:text-[rgb(var(--negative))] active:scale-95"
+            >
+              {t("chat.statementStop")}
+            </button>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <button
+              onClick={onConfirm}
+              className="flex h-9 flex-1 items-center justify-center rounded-xl bg-[rgb(var(--foreground))] text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-80 active:scale-[0.98]"
+            >
+              {t("chat.statementImportConfirm")}
+            </button>
+            <button
+              onClick={onReject}
+              className="flex h-9 items-center justify-center rounded-xl border border-[rgb(var(--border))] px-4 text-sm font-medium text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))] active:scale-[0.98]"
+            >
+              {t("chat.statementImportCancel")}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StatementStoppedCard({
+  progress,
+  summary,
+  t,
+  locale,
+}: {
+  progress: { done: number; total: number };
+  summary: StatementSummary;
+  t: (key: string) => string;
+  locale: string;
+}) {
+  const note = t("chat.statementStoppedNote")
+    .replace("{done}", String(progress.done))
+    .replace("{total}", String(progress.total));
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[rgb(var(--border))]">
+          <XIcon size={9} weight="bold" className="text-[rgb(var(--muted))]" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold">{t("chat.statementStopped")}</p>
+          <p className="text-xs text-[rgb(var(--muted))]">{note}</p>
+        </div>
+      </div>
+      {(summary.periodFrom && summary.periodTo) && (
+        <div className="border-t border-[rgb(var(--border-soft))] px-4 py-2 text-xs text-[rgb(var(--muted))]">
+          {fmtStatementDate(summary.periodFrom, locale)} — {fmtStatementDate(summary.periodTo, locale)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatementSavedCard({
+  operations,
+  summary,
+  t,
+  locale,
+}: {
+  operations: AiOperation[];
+  summary: StatementSummary;
+  t: (key: string) => string;
+  locale: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const allTx = operations.flatMap((op) =>
+    op.type === "CREATE_TRANSACTIONS" ? (op as CreateTransactionsOp).transactions : []
+  );
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3">
+        <div className="flex items-center gap-2">
+          <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[rgb(var(--positive))]">
+            <CheckIcon size={9} weight="bold" className="text-white" />
+          </div>
+          <span className="text-sm font-semibold">
+            {summary.count} {t("chat.statementTransactions")} · {t("chat.statementImported")}
+          </span>
+        </div>
+        {allTx.length > 0 && (
+          <button
+            onClick={() => setExpanded((e) => !e)}
+            className="text-xs text-[rgb(var(--muted))] transition hover:text-[rgb(var(--foreground))]"
+          >
+            {expanded ? t("chat.statementHideList") : t("chat.statementShowList")}
+          </button>
+        )}
+      </div>
+
+      {/* Summary strip */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-[rgb(var(--border-soft))] px-4 py-2">
+        {summary.periodFrom && summary.periodTo && (
+          <span className="text-xs text-[rgb(var(--muted))]">
+            {fmtStatementDate(summary.periodFrom, locale)} — {fmtStatementDate(summary.periodTo, locale)}
+          </span>
+        )}
+        {summary.totalIncome > 0 && (
+          <span className="text-xs font-medium tabular-nums text-[rgb(var(--positive))]">
+            +{fmtStatementAmount(summary.totalIncome, summary.currency)}
+          </span>
+        )}
+        {summary.totalExpenses > 0 && (
+          <span className="text-xs font-medium tabular-nums text-[rgb(var(--negative))]">
+            −{fmtStatementAmount(summary.totalExpenses, summary.currency)}
+          </span>
+        )}
+      </div>
+
+      {/* Expandable transaction list */}
+      {expanded && allTx.length > 0 && (
+        <div className="thin-scrollbar max-h-80 overflow-y-auto border-t border-[rgb(var(--border-soft))]">
+          <div className="space-y-1.5 p-3">
+            {allTx.map((tx, i) => (
+              <TxSavedCard key={i} tx={tx} t={t} locale={locale} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

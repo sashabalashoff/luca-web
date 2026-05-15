@@ -3,16 +3,95 @@
 import { createSupabaseBrowserClient } from "@/shared/lib/supabase/client";
 import { LanguageSwitcher } from "@/shared/ui/language-switcher";
 import { ThemeSwitcher } from "@/shared/ui/theme-switcher";
-import { ArrowRightIcon, GoogleLogoIcon } from "@phosphor-icons/react/dist/ssr";
-import { useState } from "react";
+import { ArrowRightIcon, FacebookLogoIcon, GoogleLogoIcon, PaperPlaneTiltIcon } from "@phosphor-icons/react/dist/ssr";
+import { useEffect, useRef, useState } from "react";
+
+type TelegramUser = {
+  id: number;
+  first_name?: string;
+  last_name?: string;
+  username?: string;
+  photo_url?: string;
+  auth_date: number;
+  hash: string;
+};
+
+declare global {
+  interface Window {
+    onTelegramAuth?: (user: TelegramUser) => void;
+  }
+}
+
+const TELEGRAM_BOT_NAME = process.env.NEXT_PUBLIC_TELEGRAM_BOT_NAME ?? "";
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 export function LoginView({ locale }: { locale: string }) {
   const supabase = createSupabaseBrowserClient();
   const [email, setEmail] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [sent, setSent] = useState(false);
+  const [tgLoading, setTgLoading] = useState(false);
+  const tgWidgetRef = useRef<HTMLDivElement>(null);
 
   const isRu = locale === "ru";
+
+  // Load Telegram widget script so clicking our button can trigger the widget popup
+  useEffect(() => {
+    if (!TELEGRAM_BOT_NAME || !tgWidgetRef.current) return;
+
+    window.onTelegramAuth = handleTelegramAuth;
+
+    const script = document.createElement("script");
+    script.src = "https://telegram.org/js/telegram-widget.js?22";
+    script.setAttribute("data-telegram-login", TELEGRAM_BOT_NAME);
+    script.setAttribute("data-size", "small");
+    script.setAttribute("data-onauth", "onTelegramAuth(user)");
+    script.setAttribute("data-request-access", "write");
+    script.async = true;
+    tgWidgetRef.current.appendChild(script);
+
+    return () => {
+      delete window.onTelegramAuth;
+    };
+  }, []);
+
+  async function handleTelegramAuth(user: TelegramUser) {
+    setTgLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/api/auth/telegram`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(user),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert((err as { error?: string }).error ?? "Telegram auth failed");
+        return;
+      }
+      const { token_hash, type } = (await res.json()) as { token_hash: string; type: string };
+      const { error } = await supabase.auth.verifyOtp({ token_hash, type: type as "magiclink" });
+      if (error) {
+        alert(error.message);
+        return;
+      }
+      window.location.href = `/${locale}/app`;
+    } finally {
+      setTgLoading(false);
+    }
+  }
+
+  function triggerTelegramWidget() {
+    // Click the Telegram widget's iframe button via the hidden container
+    const iframe = tgWidgetRef.current?.querySelector("iframe");
+    if (iframe) {
+      iframe.click();
+    } else {
+      // Widget not loaded yet — use direct link fallback
+      if (TELEGRAM_BOT_NAME) {
+        window.open(`https://t.me/${TELEGRAM_BOT_NAME}?start=auth`, "_blank");
+      }
+    }
+  }
 
   async function signInWithEmail() {
     if (!email) return;
@@ -34,6 +113,15 @@ export function LoginView({ locale }: { locale: string }) {
   async function signInWithGoogle() {
     await supabase.auth.signInWithOAuth({
       provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/${locale}/auth/callback`
+      }
+    });
+  }
+
+  async function signInWithFacebook() {
+    await supabase.auth.signInWithOAuth({
+      provider: "facebook",
       options: {
         redirectTo: `${window.location.origin}/${locale}/auth/callback`
       }
@@ -62,6 +150,11 @@ export function LoginView({ locale }: { locale: string }) {
           </p>
         </div>
 
+        {/* Hidden Telegram widget container */}
+        {TELEGRAM_BOT_NAME && (
+          <div ref={tgWidgetRef} className="absolute -left-[9999px] overflow-hidden" aria-hidden />
+        )}
+
         {sent ? (
           <div className="rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-6 text-center">
             <div className="mb-3 text-3xl">✉️</div>
@@ -83,6 +176,27 @@ export function LoginView({ locale }: { locale: string }) {
               <GoogleLogoIcon size={15} weight="bold" />
               {isRu ? "Продолжить с Google" : "Continue with Google"}
             </button>
+
+            <button
+              onClick={signInWithFacebook}
+              className="flex h-11 w-full items-center justify-center gap-2.5 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] text-sm font-medium transition-colors hover:bg-[rgb(var(--surface-soft))] active:scale-[0.99]"
+            >
+              <FacebookLogoIcon size={15} weight="bold" />
+              {isRu ? "Продолжить с Facebook" : "Continue with Facebook"}
+            </button>
+
+            {TELEGRAM_BOT_NAME && (
+              <button
+                onClick={triggerTelegramWidget}
+                disabled={tgLoading}
+                className="flex h-11 w-full items-center justify-center gap-2.5 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] text-sm font-medium transition-colors hover:bg-[rgb(var(--surface-soft))] active:scale-[0.99] disabled:opacity-50"
+              >
+                <PaperPlaneTiltIcon size={15} weight="bold" />
+                {tgLoading
+                  ? (isRu ? "Входим..." : "Signing in…")
+                  : (isRu ? "Продолжить с Telegram" : "Continue with Telegram")}
+              </button>
+            )}
 
             <div className="flex items-center gap-3">
               <div className="h-px flex-1 bg-[rgb(var(--border))]" />

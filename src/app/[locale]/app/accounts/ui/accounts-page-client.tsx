@@ -275,11 +275,19 @@ export function AccountsPageClient() {
     }
   }
 
-  // Derived
-  const totalAssets = accounts.filter((a) => !a.isDebt).reduce((sum, a) => sum + Number(a.currentBalance), 0);
-  const totalDebt = accounts.filter((a) => a.isDebt).reduce((sum, a) => sum + Number(a.currentBalance), 0);
-  const netWorth = totalAssets + totalDebt; // debt balances are already negative
+  const [netWorthData, setNetWorthData] = useState<{ totalAssets: number; totalLiabilities: number; baseCurrency: string } | null>(null);
+
+  useEffect(() => {
+    if (!workspace) return;
+    apiFetch<{ totalAssets: number; totalLiabilities: number; baseCurrency: string }>(`/api/reports/net-worth?workspaceId=${workspace.id}`)
+      .then((r) => setNetWorthData(r))
+      .catch(console.error);
+  }, [workspace, accounts]);
+
   const baseCurrency = workspace?.baseCurrency ?? "USD";
+  const totalAssets = netWorthData?.totalAssets ?? 0;
+  const totalDebt = netWorthData ? -netWorthData.totalLiabilities : 0;
+  const netWorth = totalAssets + totalDebt;
 
   return (
     <div className="luca-page space-y-5">

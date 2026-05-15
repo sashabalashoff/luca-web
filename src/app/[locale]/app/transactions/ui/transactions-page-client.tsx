@@ -13,15 +13,25 @@ import {
   ArrowsLeftRightIcon,
   CalendarBlankIcon,
   CheckIcon,
+  CheckSquareIcon,
   DownloadSimpleIcon,
   FunnelSimpleIcon,
   MagnifyingGlassIcon,
   PencilLineIcon,
   PlusIcon,
+  SquareIcon,
   TrashIcon,
   XIcon,
 } from "@phosphor-icons/react/dist/ssr";
 import { useEffect, useRef, useState } from "react";
+
+type TransactionItemRow = {
+  id: string;
+  name: string;
+  quantity?: string | null;
+  unitPrice?: string | null;
+  amount: string;
+};
 
 type Transaction = {
   id: string;
@@ -34,6 +44,8 @@ type Transaction = {
   comment?: string | null;
   category?: { id: string; name: string; icon?: string | null; type: string } | null;
   account?: { id: string; name: string } | null;
+  tags?: { tag: { id: string; name: string } }[];
+  items?: TransactionItemRow[];
 };
 
 type Category = {
@@ -113,6 +125,10 @@ export function TransactionsPageClient() {
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [csvLoading, setCsvLoading] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [deleteAllConfirm, setDeleteAllConfirm] = useState(false);
 
   // Add form
   const [showAddForm, setShowAddForm] = useState(false);
@@ -237,6 +253,35 @@ export function TransactionsPageClient() {
     }
   }
 
+  async function bulkDeleteTransactions(ids: string[]) {
+    if (!workspace || ids.length === 0) return;
+    setBulkDeleting(true);
+    try {
+      await apiFetch("/api/transactions/bulk-delete", {
+        method: "POST",
+        body: JSON.stringify({ workspaceId: workspace.id, ids }),
+      });
+      setTransactions((prev) => prev.filter((tx) => !ids.includes(tx.id)));
+      setSelectedIds(new Set());
+      setSelectionMode(false);
+      setDeleteAllConfirm(false);
+      reloadContext();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   async function createTransaction() {
     if (!workspace || !addForm.amount) return;
     const accountId = addForm.accountId || defaultAccount?.id;
@@ -356,16 +401,68 @@ export function TransactionsPageClient() {
             <DownloadSimpleIcon size={15} />
           </button>
           {!isViewer && (
-            <button
-              onClick={() => setShowAddForm(true)}
-              className="flex h-9 items-center gap-1.5 rounded-lg bg-[rgb(var(--foreground))] px-4 text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85 active:scale-[0.97]"
-            >
-              <PlusIcon size={14} weight="bold" />
-              <span className="hidden sm:inline">{t("transactions.new")}</span>
-            </button>
+            <>
+              {!selectionMode && (
+                <button
+                  onClick={() => setDeleteAllConfirm(true)}
+                  className="flex h-9 items-center gap-1.5 rounded-lg border border-[rgb(var(--border))] px-3 text-sm font-medium text-[rgb(var(--negative))] transition hover:bg-[rgb(var(--negative-dim))]"
+                  title={locale === "ru" ? "Удалить все" : "Delete all"}
+                >
+                  <TrashIcon size={14} weight="bold" />
+                </button>
+              )}
+              <button
+                onClick={() => { setSelectionMode((v) => !v); setSelectedIds(new Set()); }}
+                className={[
+                  "flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium transition",
+                  selectionMode
+                    ? "border-[rgb(var(--accent))] bg-[rgb(var(--accent-dim))] text-[rgb(var(--accent))]"
+                    : "border-[rgb(var(--border))] text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))]",
+                ].join(" ")}
+              >
+                {selectionMode ? <CheckSquareIcon size={14} weight="bold" /> : <SquareIcon size={14} />}
+                <span className="hidden sm:inline">{locale === "ru" ? "Выбрать" : "Select"}</span>
+              </button>
+              {!selectionMode && (
+                <button
+                  onClick={() => setShowAddForm(true)}
+                  className="flex h-9 items-center gap-1.5 rounded-lg bg-[rgb(var(--foreground))] px-4 text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85 active:scale-[0.97]"
+                >
+                  <PlusIcon size={14} weight="bold" />
+                  <span className="hidden sm:inline">{t("transactions.new")}</span>
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>
+
+      {/* Delete all confirmation bar */}
+      {deleteAllConfirm && (
+        <div className="mb-4 flex items-center justify-between rounded-xl border border-[rgb(var(--negative-dim))] bg-[rgb(var(--negative-dim))] px-4 py-3">
+          <span className="text-sm font-medium text-[rgb(var(--negative))]">
+            {locale === "ru"
+              ? `Удалить все ${transactions.length} транзакций? Действие необратимо.`
+              : `Delete all ${transactions.length} transactions? This cannot be undone.`}
+          </span>
+          <div className="flex shrink-0 items-center gap-2 ml-4">
+            <button
+              onClick={() => bulkDeleteTransactions(transactions.map((tx) => tx.id))}
+              disabled={bulkDeleting}
+              className="flex h-8 items-center gap-1.5 rounded-lg bg-[rgb(var(--negative))] px-3 text-xs font-medium text-white disabled:opacity-50"
+            >
+              <TrashIcon size={12} weight="bold" />
+              {locale === "ru" ? "Да, удалить" : "Yes, delete"}
+            </button>
+            <button
+              onClick={() => setDeleteAllConfirm(false)}
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-[rgb(var(--border))] text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))]"
+            >
+              <XIcon size={12} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Add Transaction Modal */}
       <Modal
@@ -734,6 +831,9 @@ export function TransactionsPageClient() {
                       onDeleteCancel={() => setConfirmDeleteId(null)}
                       onEdit={() => setEditingTx(tx)}
                       readOnly={isViewer}
+                      selectionMode={selectionMode}
+                      isSelected={selectedIds.has(tx.id)}
+                      onToggleSelect={() => toggleSelect(tx.id)}
                       t={t}
                     />
                   ))}
@@ -755,6 +855,37 @@ export function TransactionsPageClient() {
           )}
         </div>
       )}
+
+      {/* Bulk action bar */}
+      {selectionMode && (
+        <div className="sticky bottom-4 mt-4 flex items-center justify-between rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-4 py-3 shadow-lg">
+          <span className="text-sm text-[rgb(var(--muted))]">
+            {selectedIds.size > 0
+              ? (locale === "ru" ? `Выбрано: ${selectedIds.size}` : `Selected: ${selectedIds.size}`)
+              : (locale === "ru" ? "Выберите транзакции" : "Select transactions")}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                const allIds = transactions.map((tx) => tx.id);
+                const allSelected = allIds.every((id) => selectedIds.has(id));
+                setSelectedIds(allSelected ? new Set() : new Set(allIds));
+              }}
+              className="h-8 rounded-lg border border-[rgb(var(--border))] px-3 text-xs font-medium text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))]"
+            >
+              {locale === "ru" ? "Выбрать все" : "Select all"}
+            </button>
+            <button
+              onClick={() => bulkDeleteTransactions(Array.from(selectedIds))}
+              disabled={selectedIds.size === 0 || bulkDeleting}
+              className="flex h-8 items-center gap-1.5 rounded-lg bg-[rgb(var(--negative))] px-3 text-xs font-medium text-white disabled:opacity-40"
+            >
+              <TrashIcon size={12} weight="bold" />
+              {locale === "ru" ? `Удалить (${selectedIds.size})` : `Delete (${selectedIds.size})`}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -770,6 +901,9 @@ function TxRow({
   onDeleteCancel,
   onEdit,
   readOnly = false,
+  selectionMode = false,
+  isSelected = false,
+  onToggleSelect,
   t,
 }: {
   tx: Transaction;
@@ -781,6 +915,9 @@ function TxRow({
   onDeleteCancel: () => void;
   onEdit: () => void;
   readOnly?: boolean;
+  selectionMode?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: () => void;
   t: (key: string) => string;
 }) {
   const isExpense = tx.type === "EXPENSE";
@@ -808,24 +945,33 @@ function TxRow({
 
   return (
     <div
+      onClick={selectionMode ? onToggleSelect : undefined}
       className={[
         "group flex items-center gap-3 px-4 py-3 transition-colors",
         !isLast ? "border-b border-[rgb(var(--border-soft))]" : "",
         isDeleting ? "opacity-40" : "hover:bg-[rgb(var(--surface-soft))]",
+        selectionMode ? "cursor-pointer" : "",
+        selectionMode && isSelected ? "bg-[rgb(var(--accent-dim))]" : "",
       ].join(" ")}
     >
-      {/* Icon */}
-      <div className={["flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs", iconBg].join(" ")}>
-        {tx.category?.icon ? (
-          <span className="leading-none text-sm">{tx.category.icon}</span>
-        ) : isExpense ? (
-          <ArrowDownIcon size={14} weight="bold" />
-        ) : isIncome ? (
-          <ArrowUpIcon size={14} weight="bold" />
-        ) : (
-          <ArrowsLeftRightIcon size={14} weight="bold" />
-        )}
-      </div>
+      {/* Icon or checkbox */}
+      {selectionMode ? (
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center text-[rgb(var(--accent))]">
+          {isSelected ? <CheckSquareIcon size={20} weight="fill" /> : <SquareIcon size={20} />}
+        </div>
+      ) : (
+        <div className={["flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs", iconBg].join(" ")}>
+          {tx.category?.icon ? (
+            <span className="leading-none text-sm">{tx.category.icon}</span>
+          ) : isExpense ? (
+            <ArrowDownIcon size={14} weight="bold" />
+          ) : isIncome ? (
+            <ArrowUpIcon size={14} weight="bold" />
+          ) : (
+            <ArrowsLeftRightIcon size={14} weight="bold" />
+          )}
+        </div>
+      )}
 
       {/* Label */}
       <div className="min-w-0 flex-1">
@@ -834,6 +980,18 @@ function TxRow({
           <div className="flex items-center gap-1.5 mt-0.5">
             {sub && <span className="truncate text-xs text-[rgb(var(--muted))]">{sub}</span>}
             {showTime && <span className="shrink-0 text-[10px] text-[rgb(var(--muted-soft))]">{timeStr}</span>}
+          </div>
+        )}
+        {tx.tags && tx.tags.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {tx.tags.map(({ tag }) => (
+              <span
+                key={tag.id}
+                className="rounded-full border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] px-1.5 py-px text-[9px] text-[rgb(var(--muted))]"
+              >
+                {tag.name}
+              </span>
+            ))}
           </div>
         )}
       </div>
@@ -847,7 +1005,7 @@ function TxRow({
       </div>
 
       {/* Actions */}
-      {!readOnly && (
+      {!readOnly && !selectionMode && (
         <div className="ml-1 flex shrink-0 items-center gap-0.5">
           {confirmingDelete ? (
             <>
@@ -1080,6 +1238,63 @@ function EditModal({
             className="h-10 w-full rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 text-sm outline-none focus:border-[rgb(var(--accent))]"
           />
         </div>
+
+        {/* Tags (read-only) */}
+        {tx.tags && tx.tags.length > 0 && (
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
+              {locale === "ru" ? "Теги" : "Tags"}
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              {tx.tags.map(({ tag }) => (
+                <span
+                  key={tag.id}
+                  className="rounded-full border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] px-2.5 py-1 text-xs text-[rgb(var(--muted))]"
+                >
+                  {tag.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Items (read-only) */}
+        {tx.items && tx.items.length > 0 && (
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-[rgb(var(--muted))]">
+              {locale === "ru" ? "Состав чека" : "Receipt items"}
+            </label>
+            <div className="overflow-hidden rounded-lg border border-[rgb(var(--border-soft))]">
+              {tx.items.map((item, idx) => (
+                <div
+                  key={item.id}
+                  className={[
+                    "flex items-baseline justify-between gap-2 px-3 py-1.5 text-xs",
+                    idx < tx.items!.length - 1 ? "border-b border-[rgb(var(--border-soft))]" : "",
+                  ].join(" ")}
+                >
+                  <span className="min-w-0 truncate text-[rgb(var(--foreground))]">
+                    {Number(item.quantity) && Number(item.quantity) !== 1
+                      ? `${Number(item.quantity)}× `
+                      : ""}
+                    {item.name}
+                  </span>
+                  <span className="shrink-0 tabular-nums text-[rgb(var(--muted))]">
+                    {Number(item.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+              ))}
+              <div className="flex items-baseline justify-between gap-2 border-t border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3 py-1.5 text-xs font-semibold">
+                <span className="text-[rgb(var(--muted))]">
+                  {locale === "ru" ? "Итого" : "Total"}
+                </span>
+                <span className="tabular-nums">
+                  {Number(tx.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {tx.currency}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </Modal>
   );

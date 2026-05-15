@@ -1,11 +1,10 @@
 "use client";
 
 import { apiFetch } from "@/shared/api/client";
+import { Locale, locales } from "@/shared/config/locales";
 import { useI18n } from "@/shared/i18n/i18n-provider";
 import { createSupabaseBrowserClient } from "@/shared/lib/supabase/client";
 import { useLuca } from "@/shared/providers/luca-provider";
-import { Locale, locales } from "@/shared/config/locales";
-import { useTheme } from "next-themes";
 import {
   BuildingsIcon,
   CheckIcon,
@@ -13,6 +12,7 @@ import {
   MoonIcon,
   PaintBrushIcon,
   PlusIcon,
+  RobotIcon,
   SignOutIcon,
   SunIcon,
   TrashIcon,
@@ -20,16 +20,18 @@ import {
   UsersThreeIcon,
   XIcon,
 } from "@phosphor-icons/react/dist/ssr";
+import { useTheme } from "next-themes";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-type SectionId = "profile" | "appearance" | "workspace" | "team" | "plan" | "session";
+type SectionId = "profile" | "appearance" | "workspace" | "team" | "ai" | "plan" | "session";
 
 const NAV: { id: SectionId; en: string; ru: string; Icon: React.ElementType }[] = [
   { id: "profile", en: "Profile", ru: "Профиль", Icon: UserIcon },
   { id: "appearance", en: "Appearance", ru: "Внешний вид", Icon: PaintBrushIcon },
   { id: "workspace", en: "Workspace", ru: "Воркспейс", Icon: BuildingsIcon },
   { id: "team", en: "Team", ru: "Команда", Icon: UsersThreeIcon },
+  { id: "ai", en: "AI Settings", ru: "Настройки ИИ", Icon: RobotIcon },
   { id: "plan", en: "Plan & Version", ru: "Тариф и версия", Icon: CreditCardIcon },
   { id: "session", en: "Session", ru: "Сессия", Icon: SignOutIcon },
 ];
@@ -51,15 +53,40 @@ export default function SettingsPage() {
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
 
+  /* ── AI Settings ──────────────────────────────── */
+  const [aiPromptInput, setAiPromptInput] = useState("");
+  const [savingAiPrompt, setSavingAiPrompt] = useState(false);
+  const [aiPromptSaved, setAiPromptSaved] = useState(false);
+  const [originalAiPrompt, setOriginalAiPrompt] = useState<string | null>(null);
+
   useEffect(() => {
-    apiFetch<{ user: { email: string; name: string | null } }>("/api/settings")
+    apiFetch<{ user: { email: string; name: string | null; aiSystemPrompt: string | null } }>("/api/settings")
       .then((data) => {
         setUserEmail(data.user.email);
         setUserName(data.user.name);
         setProfileInput(data.user.name ?? "");
+        setAiPromptInput(data.user.aiSystemPrompt ?? "");
+        setOriginalAiPrompt(data.user.aiSystemPrompt ?? "");
       })
       .catch(console.error);
   }, []);
+
+  async function saveAiPrompt() {
+    setSavingAiPrompt(true);
+    try {
+      await apiFetch("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ aiSystemPrompt: aiPromptInput.trim() || null }),
+      });
+      setOriginalAiPrompt(aiPromptInput.trim() || null);
+      setAiPromptSaved(true);
+      setTimeout(() => setAiPromptSaved(false), 2000);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSavingAiPrompt(false);
+    }
+  }
 
   async function saveProfile() {
     if (!profileInput.trim()) return;
@@ -619,6 +646,60 @@ export default function SettingsPage() {
                   })}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ── AI Settings ── */}
+          {activeSection === "ai" && (
+            <div className="space-y-6">
+              <SectionHeader
+                title={locale === "ru" ? "Настройки ИИ" : "AI Settings"}
+                description={
+                  locale === "ru"
+                    ? "Системные инструкции добавляются в каждый чат и позволяют настроить поведение ИИ под ваши нужды."
+                    : "System instructions are added to every chat and let you customize how the AI behaves for your use case."
+                }
+              />
+              <div className="luca-panel p-4">
+                <div className="mb-2">
+                  <div className="text-sm font-medium text-[rgb(var(--foreground))]">
+                    {locale === "ru" ? "Системные инструкции" : "System instructions"}
+                  </div>
+                  <div className="mt-0.5 text-xs text-[rgb(var(--muted))]">
+                    {locale === "ru"
+                      ? "ИИ получит эти инструкции в начале каждого чата. Максимум 5000 символов."
+                      : "The AI receives these instructions at the start of every chat. Max 5000 characters."}
+                  </div>
+                </div>
+                <textarea
+                  value={aiPromptInput}
+                  onChange={(e) => setAiPromptInput(e.target.value)}
+                  maxLength={5000}
+                  rows={8}
+                  placeholder={
+                    locale === "ru"
+                      ? "Например: «Общайся со мной неформально, на ты. Моя основная валюта — рубли. При добавлении транзакции всегда уточняй категорию.»"
+                      : "E.g. «Keep responses brief. My main currency is USD. When I add a transaction always suggest a category.»"
+                  }
+                  className="mt-3 w-full resize-none rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface-soft))] px-3.5 py-2.5 text-sm leading-relaxed outline-none placeholder:text-[rgb(var(--muted))] focus:border-[rgb(var(--accent))] focus:ring-2 focus:ring-[rgb(var(--accent)/0.12)]"
+                />
+                <div className="mt-2 flex items-center justify-between">
+                  <span className="text-xs text-[rgb(var(--muted))]">
+                    {aiPromptInput.length} / 5000
+                  </span>
+                  <button
+                    onClick={saveAiPrompt}
+                    disabled={savingAiPrompt || aiPromptInput.trim() === (originalAiPrompt ?? "")}
+                    className="flex h-8 items-center gap-1.5 rounded-lg bg-[rgb(var(--foreground))] px-3 text-xs font-medium text-[rgb(var(--background))] disabled:opacity-40"
+                  >
+                    {aiPromptSaved ? (
+                      <><CheckIcon size={11} weight="bold" />{locale === "ru" ? "Сохранено" : "Saved"}</>
+                    ) : (
+                      locale === "ru" ? "Сохранить" : "Save"
+                    )}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 

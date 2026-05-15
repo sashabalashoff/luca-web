@@ -53,6 +53,13 @@ export type Transaction = {
 
 // ─── AI Operation types (mirrors server/ai/parser.ts) ────────────────────────
 
+export type TransactionItem = {
+  name: string;
+  quantity?: number | null;
+  unitPrice?: number | null;
+  amount: number;
+};
+
 export type ParsedTransaction = {
   type: "INCOME" | "EXPENSE" | "TRANSFER";
   amount: number;
@@ -64,6 +71,8 @@ export type ParsedTransaction = {
   comment?: string | null;
   date: string;
   confidence: number;
+  tags?: string[];
+  items?: TransactionItem[];
 };
 
 export type CreateTransactionsOp = {

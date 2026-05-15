@@ -20,12 +20,8 @@ export default async function LocaleLayout({
   const dictionary = await getDictionary(locale);
 
   return (
-    <html lang={locale} suppressHydrationWarning>
-      <body>
-        <AppProviders locale={locale as Locale} dictionary={dictionary}>
-          {children}
-        </AppProviders>
-      </body>
-    </html>
+    <AppProviders locale={locale as Locale} dictionary={dictionary}>
+      {children}
+    </AppProviders>
   );
 }

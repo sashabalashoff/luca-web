@@ -8,9 +8,11 @@ import {
   CaretDownIcon,
   CaretRightIcon,
   CheckIcon,
+  CheckSquareIcon,
   MagnifyingGlassIcon,
   PencilSimpleIcon,
   PlusIcon,
+  SquareIcon,
   TagIcon,
   TrashIcon,
   XIcon,
@@ -262,6 +264,10 @@ export function CategoriesPageClient() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<CategoryForm>(EMPTY_FORM);
   const [formOpen, setFormOpen] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [deleteAllConfirm, setDeleteAllConfirm] = useState(false);
 
   function loadCategories() {
     if (!workspace) return;
@@ -357,6 +363,34 @@ export function CategoriesPageClient() {
     }
   }
 
+  async function bulkDeleteCategories(ids: string[]) {
+    if (!workspace || ids.length === 0) return;
+    setBulkDeleting(true);
+    try {
+      await apiFetch("/api/categories/bulk-delete", {
+        method: "POST",
+        body: JSON.stringify({ workspaceId: workspace.id, ids }),
+      });
+      setSelectedIds(new Set());
+      setSelectionMode(false);
+      setDeleteAllConfirm(false);
+      loadCategories();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   function toggleExpanded(id: string) {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -405,14 +439,69 @@ export function CategoriesPageClient() {
           <h1 className="text-2xl font-semibold tracking-tight">{t("categories.title")}</h1>
           <p className="mt-1 text-sm text-[rgb(var(--muted))]">{t("categories.subtitle")}</p>
         </div>
-        <button
-          onClick={() => openCreate(activeType)}
-          className="flex h-10 items-center gap-2 rounded-lg bg-[rgb(var(--foreground))] px-4 text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85"
-        >
-          <PlusIcon size={15} weight="bold" />
-          {t("categories.add")}
-        </button>
+        <div className="flex items-center gap-2">
+          {!selectionMode && (
+            <button
+              onClick={() => { setDeleteAllConfirm(true); }}
+              className="flex h-10 items-center gap-2 rounded-lg border border-[rgb(var(--border))] px-4 text-sm font-medium text-[rgb(var(--negative))] transition hover:bg-[rgb(var(--negative-dim))]"
+            >
+              <TrashIcon size={14} weight="bold" />
+              {locale === "ru" ? "Удалить все" : "Delete all"}
+            </button>
+          )}
+          <button
+            onClick={() => {
+              setSelectionMode((v) => !v);
+              setSelectedIds(new Set());
+            }}
+            className={[
+              "flex h-10 items-center gap-2 rounded-lg border px-4 text-sm font-medium transition",
+              selectionMode
+                ? "border-[rgb(var(--accent))] bg-[rgb(var(--accent-dim))] text-[rgb(var(--accent))]"
+                : "border-[rgb(var(--border))] text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))]",
+            ].join(" ")}
+          >
+            {selectionMode ? <CheckSquareIcon size={15} weight="bold" /> : <SquareIcon size={15} />}
+            {locale === "ru" ? "Выбрать" : "Select"}
+          </button>
+          {!selectionMode && (
+            <button
+              onClick={() => openCreate(activeType)}
+              className="flex h-10 items-center gap-2 rounded-lg bg-[rgb(var(--foreground))] px-4 text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85"
+            >
+              <PlusIcon size={15} weight="bold" />
+              {t("categories.add")}
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Delete all confirmation */}
+      {deleteAllConfirm && (
+        <div className="flex items-center justify-between rounded-xl border border-[rgb(var(--negative-dim))] bg-[rgb(var(--negative-dim))] px-4 py-3">
+          <span className="text-sm font-medium text-[rgb(var(--negative))]">
+            {locale === "ru"
+              ? `Удалить все ${activeType === "EXPENSE" ? "расходные" : "доходные"} категории? Транзакции потеряют категорию.`
+              : `Delete all ${activeType === "EXPENSE" ? "expense" : "income"} categories? Transactions will lose their category.`}
+          </span>
+          <div className="flex shrink-0 items-center gap-2 ml-4">
+            <button
+              onClick={() => bulkDeleteCategories(visibleRoots.flatMap((r) => [r.id, ...(childrenByParent.get(r.id) ?? []).map((c) => c.id)]))}
+              disabled={bulkDeleting}
+              className="flex h-8 items-center gap-1.5 rounded-lg bg-[rgb(var(--negative))] px-3 text-xs font-medium text-white disabled:opacity-50"
+            >
+              <TrashIcon size={12} weight="bold" />
+              {locale === "ru" ? "Да, удалить" : "Yes, delete"}
+            </button>
+            <button
+              onClick={() => setDeleteAllConfirm(false)}
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-[rgb(var(--border))] text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))]"
+            >
+              <XIcon size={12} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Type tabs + search */}
       <div className="luca-panel p-3">
@@ -494,6 +583,7 @@ export function CategoriesPageClient() {
               )}
             </div>
           ) : (
+            <>
             <div className="divide-y divide-[rgb(var(--border-soft))]">
               {visibleRoots.map((category) => {
                 const children = (childrenByParent.get(category.id) ?? []).filter((ch) =>
@@ -508,6 +598,9 @@ export function CategoriesPageClient() {
                       isExpanded={shouldShowChildren}
                       isEditing={editingId === category.id && !formOpen}
                       deleteConfirmId={deleteConfirmId}
+                      selectionMode={selectionMode}
+                      isSelected={selectedIds.has(category.id)}
+                      onToggleSelect={() => toggleSelect(category.id)}
                       onToggle={() => toggleExpanded(category.id)}
                       onCreateChild={() => {
                         setExpanded((prev) => new Set(prev).add(category.id));
@@ -531,6 +624,9 @@ export function CategoriesPageClient() {
                             isExpanded={false}
                             isEditing={editingId === child.id && !formOpen}
                             deleteConfirmId={deleteConfirmId}
+                            selectionMode={selectionMode}
+                            isSelected={selectedIds.has(child.id)}
+                            onToggleSelect={() => toggleSelect(child.id)}
                             onToggle={() => undefined}
                             onCreateChild={() => undefined}
                             onEdit={() => editCategory(child)}
@@ -547,6 +643,36 @@ export function CategoriesPageClient() {
                 );
               })}
             </div>
+            {selectionMode && (
+              <div className="flex items-center justify-between border-t border-[rgb(var(--border-soft))] bg-[rgb(var(--surface))] px-4 py-3">
+                <span className="text-sm text-[rgb(var(--muted))]">
+                  {selectedIds.size > 0
+                    ? (locale === "ru" ? `Выбрано: ${selectedIds.size}` : `Selected: ${selectedIds.size}`)
+                    : (locale === "ru" ? "Выберите категории" : "Select categories")}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      const allIds = visibleRoots.flatMap((r) => [r.id, ...(childrenByParent.get(r.id) ?? []).map((c) => c.id)]);
+                      const allSelected = allIds.every((id) => selectedIds.has(id));
+                      setSelectedIds(allSelected ? new Set() : new Set(allIds));
+                    }}
+                    className="h-8 rounded-lg border border-[rgb(var(--border))] px-3 text-xs font-medium text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface-soft))]"
+                  >
+                    {locale === "ru" ? "Выбрать все" : "Select all"}
+                  </button>
+                  <button
+                    onClick={() => bulkDeleteCategories(Array.from(selectedIds))}
+                    disabled={selectedIds.size === 0 || bulkDeleting}
+                    className="flex h-8 items-center gap-1.5 rounded-lg bg-[rgb(var(--negative))] px-3 text-xs font-medium text-white disabled:opacity-40"
+                  >
+                    <TrashIcon size={12} weight="bold" />
+                    {locale === "ru" ? `Удалить (${selectedIds.size})` : `Delete (${selectedIds.size})`}
+                  </button>
+                </div>
+              </div>
+            )}
+            </>
           )}
         </div>
 
@@ -622,6 +748,9 @@ function CategoryRow({
   isExpanded,
   isEditing,
   deleteConfirmId,
+  selectionMode,
+  isSelected,
+  onToggleSelect,
   onToggle,
   onCreateChild,
   onEdit,
@@ -637,6 +766,9 @@ function CategoryRow({
   isExpanded: boolean;
   isEditing: boolean;
   deleteConfirmId: string | null;
+  selectionMode: boolean;
+  isSelected: boolean;
+  onToggleSelect: () => void;
   onToggle: () => void;
   onCreateChild: () => void;
   onEdit: () => void;
@@ -655,22 +787,32 @@ function CategoryRow({
         "flex items-center gap-3 px-3 py-2.5 transition",
         nested ? "rounded-lg" : "",
         isEditing ? "bg-[rgb(var(--accent-dim))]" : "hover:bg-[rgb(var(--surface-soft))]",
+        selectionMode && isSelected ? "bg-[rgb(var(--accent-dim))]" : "",
       ].join(" ")}
     >
-      <button
-        onClick={childCount > 0 ? onToggle : onCreateChild}
-        className={[
-          "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface))] hover:text-[rgb(var(--foreground))]",
-          nested ? "invisible" : "",
-        ].join(" ")}
-        title={childCount > 0 ? undefined : t("categories.addSub")}
-      >
-        {childCount > 0 ? (
-          isExpanded ? <CaretDownIcon size={13} weight="bold" /> : <CaretRightIcon size={13} weight="bold" />
-        ) : (
-          <PlusIcon size={13} weight="bold" />
-        )}
-      </button>
+      {selectionMode ? (
+        <button
+          onClick={onToggleSelect}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[rgb(var(--accent))] transition hover:bg-[rgb(var(--surface))]"
+        >
+          {isSelected ? <CheckSquareIcon size={18} weight="fill" /> : <SquareIcon size={18} />}
+        </button>
+      ) : (
+        <button
+          onClick={childCount > 0 ? onToggle : onCreateChild}
+          className={[
+            "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--surface))] hover:text-[rgb(var(--foreground))]",
+            nested ? "invisible" : "",
+          ].join(" ")}
+          title={childCount > 0 ? undefined : t("categories.addSub")}
+        >
+          {childCount > 0 ? (
+            isExpanded ? <CaretDownIcon size={13} weight="bold" /> : <CaretRightIcon size={13} weight="bold" />
+          ) : (
+            <PlusIcon size={13} weight="bold" />
+          )}
+        </button>
+      )}
 
       <CategoryMark category={category} />
 
@@ -712,7 +854,7 @@ function CategoryRow({
             <XIcon size={12} />
           </button>
         </div>
-      ) : (
+      ) : !selectionMode && (
         <div className="flex shrink-0 items-center gap-1">
           {!nested && (
             <button
@@ -730,15 +872,13 @@ function CategoryRow({
           >
             <PencilSimpleIcon size={14} weight="bold" />
           </button>
-          {!category.isDefault && (
-            <button
-              onClick={onDeleteRequest}
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--negative-dim))] hover:text-[rgb(var(--negative))]"
-              title={t("common.delete")}
-            >
-              <TrashIcon size={14} weight="bold" />
-            </button>
-          )}
+          <button
+            onClick={onDeleteRequest}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-[rgb(var(--muted))] transition hover:bg-[rgb(var(--negative-dim))] hover:text-[rgb(var(--negative))]"
+            title={t("common.delete")}
+          >
+            <TrashIcon size={14} weight="bold" />
+          </button>
         </div>
       )}
     </div>
