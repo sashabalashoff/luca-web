@@ -23,13 +23,17 @@ import {
   ArrowUpIcon,
   BankIcon,
   CameraIcon,
+  CaretDownIcon,
+  CaretRightIcon,
   CheckIcon,
+  CheckSquareIcon,
   CopyIcon,
   FolderIcon,
   MicrophoneIcon,
   PencilSimpleIcon,
   ShareNetworkIcon,
   SlidersIcon,
+  SquareIcon,
   StopCircleIcon,
   TargetIcon,
   ThumbsDownIcon,
@@ -68,6 +72,7 @@ type ChatAction = {
   status: string;
   operations: AiOperation[];
   overrides?: TransactionOverride[];
+  selectedTransactionIndexes?: number[];
 };
 
 type StatementSummary = {
@@ -126,6 +131,34 @@ function extractOperations(payloadJson: Record<string, unknown>): AiOperation[] 
     return [{ type: "CREATE_TRANSACTIONS", transactions: payloadJson.transactions }] as AiOperation[];
   }
   return [];
+}
+
+function getCreateTransactionOps(operations: AiOperation[]): CreateTransactionsOp[] {
+  return operations.filter((op): op is CreateTransactionsOp => op.type === "CREATE_TRANSACTIONS");
+}
+
+function getOperationTransactions(operations: AiOperation[]): ParsedTransaction[] {
+  return getCreateTransactionOps(operations).flatMap((op) => op.transactions);
+}
+
+function filterCreateTransactionOperations(
+  operations: AiOperation[],
+  selectedIndexes?: number[]
+): AiOperation[] {
+  if (!selectedIndexes) return operations;
+  const selected = new Set(selectedIndexes);
+  let txIndex = 0;
+
+  return operations
+    .map((op) => {
+      if (op.type !== "CREATE_TRANSACTIONS") return op;
+      const txOp = op as CreateTransactionsOp;
+      return {
+        ...txOp,
+        transactions: txOp.transactions.filter(() => selected.has(txIndex++)),
+      };
+    })
+    .filter((op) => op.type !== "CREATE_TRANSACTIONS" || (op as CreateTransactionsOp).transactions.length > 0);
 }
 
 // ─── Category type (minimal, for picker) ─────────────────────────────────────
@@ -481,7 +514,7 @@ export function ChatPageClient() {
       fd.append("locale", locale);
       if (sessionId) fd.append("sessionId", sessionId);
 
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/ai/import-statement`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/ai/import-statement-vision`, {
         method: "POST",
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: fd,
@@ -524,7 +557,12 @@ export function ChatPageClient() {
               ...m,
               content: "",
               streaming: false,
-              action: { id: data.actionId!, status: "PENDING", operations: data.operations },
+              action: {
+                id: data.actionId!,
+                status: "PENDING",
+                operations: data.operations,
+                selectedTransactionIndexes: getOperationTransactions(data.operations).map((_, index) => index),
+              },
               importSummary: data.summary,
             }
             : m
@@ -550,13 +588,16 @@ export function ChatPageClient() {
 
     const operations = action.operations ?? [];
     const overrides = action.overrides ?? [];
+    const selectedTransactionIndexes = action.selectedTransactionIndexes;
+    const operationsToSave = filterCreateTransactionOperations(operations, selectedTransactionIndexes);
 
-    const hasTx = operations.some((op) => op.type === "CREATE_TRANSACTIONS");
+    const hasTx = operationsToSave.some((op) => op.type === "CREATE_TRANSACTIONS");
     if (hasTx && !defaultAccount) return;
+    if (msg?.importSummary && getOperationTransactions(operationsToSave).length === 0) return;
 
     // Merge overrides into savedOperations so TxSavedCard shows the confirmed values
     let overrideIdx = 0;
-    const savedOperations: AiOperation[] = operations.map((op) => {
+    const savedOperations: AiOperation[] = operationsToSave.map((op) => {
       if (op.type !== "CREATE_TRANSACTIONS") return op;
       return {
         ...op,
@@ -596,7 +637,10 @@ export function ChatPageClient() {
               "Content-Type": "application/json",
               ...(token ? { Authorization: `Bearer ${token}` } : {}),
             },
-            body: JSON.stringify({ accountId: defaultAccount?.id ?? null }),
+            body: JSON.stringify({
+              accountId: defaultAccount?.id ?? null,
+              selectedTransactionIndexes,
+            }),
             signal: controller.signal,
           }
         );
@@ -811,6 +855,16 @@ export function ChatPageClient() {
     );
   }
 
+  function updateStatementSelection(actionId: string, selectedTransactionIndexes: number[]) {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.action?.id === actionId
+          ? { ...m, action: { ...m.action, selectedTransactionIndexes } }
+          : m
+      )
+    );
+  }
+
   return (
     <div className="absolute inset-0 flex flex-col overflow-hidden">
       {/* ── Message area ── */}
@@ -881,6 +935,7 @@ export function ChatPageClient() {
                   onReject={rejectAction}
                   onStop={stopImport}
                   onUpdateOverride={updateOverride}
+                  onUpdateStatementSelection={updateStatementSelection}
                   onFeedback={sendFeedback}
                   onRetry={retryAssistantMessage}
                   t={t}
@@ -1634,6 +1689,7 @@ function MessageRow({
   onReject,
   onStop,
   onUpdateOverride,
+  onUpdateStatementSelection,
   onFeedback,
   onRetry,
   t,
@@ -1646,6 +1702,7 @@ function MessageRow({
   onReject: (id: string) => void;
   onStop: () => void;
   onUpdateOverride: (actionId: string, txIndex: number, patch: Partial<TransactionOverride>) => void;
+  onUpdateStatementSelection: (actionId: string, selectedTransactionIndexes: number[]) => void;
   onFeedback: (messageId: string, rating: "UP" | "DOWN") => void;
   onRetry: (messageId: string) => void;
   t: (key: string) => string;
@@ -1715,12 +1772,16 @@ function MessageRow({
         {message.action && message.importSummary && (
           <StatementImportCard
             summary={message.importSummary}
+            transactions={getOperationTransactions(message.action.operations)}
+            selectedIndexes={message.action.selectedTransactionIndexes}
+            onSelectionChange={(indexes) => onUpdateStatementSelection(message.action!.id, indexes)}
             onConfirm={() => onConfirm(message.action!.id)}
             onReject={() => onReject(message.action!.id)}
             onStop={onStop}
             saving={!!message.saving}
             saveProgress={message.saveProgress ?? null}
             t={t}
+            locale={locale}
           />
         )}
 
@@ -2605,25 +2666,62 @@ function fmtStatementAmount(n: number, currency: string) {
 
 function StatementImportCard({
   summary,
+  transactions,
+  selectedIndexes,
+  onSelectionChange,
   onConfirm,
   onReject,
   onStop,
   saving,
   saveProgress,
   t,
+  locale,
 }: {
   summary: StatementSummary;
+  transactions: ParsedTransaction[];
+  selectedIndexes?: number[];
+  onSelectionChange: (indexes: number[]) => void;
   onConfirm: () => void;
   onReject: () => void;
   onStop: () => void;
   saving: boolean;
   saveProgress: { done: number; total: number } | null;
   t: (key: string) => string;
+  locale: string;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const R = 16;
   const circumference = 2 * Math.PI * R;
   const progress = saveProgress && saveProgress.total > 0 ? saveProgress.done / saveProgress.total : 0;
   const offset = circumference * (1 - progress);
+  const selectedSet = new Set(selectedIndexes ?? transactions.map((_, index) => index));
+  const selectedTransactions = transactions.filter((_, index) => selectedSet.has(index));
+  const selectedIncome = selectedTransactions
+    .filter((tx) => tx.type === "INCOME")
+    .reduce((sum, tx) => sum + tx.amount, 0);
+  const selectedExpenses = selectedTransactions
+    .filter((tx) => tx.type === "EXPENSE")
+    .reduce((sum, tx) => sum + tx.amount, 0);
+  const isRu = locale === "ru";
+
+  function setSelected(next: Set<number>) {
+    onSelectionChange([...next].sort((a, b) => a - b));
+  }
+
+  function toggleIndex(index: number) {
+    const next = new Set(selectedSet);
+    if (next.has(index)) next.delete(index);
+    else next.add(index);
+    setSelected(next);
+  }
+
+  function toggleAll() {
+    if (selectedSet.size === transactions.length) {
+      onSelectionChange([]);
+    } else {
+      onSelectionChange(transactions.map((_, index) => index));
+    }
+  }
 
   return (
     <div className="overflow-hidden rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
@@ -2634,7 +2732,10 @@ function StatementImportCard({
           <span className="text-sm font-semibold">{t("chat.statementImportTitle")}</span>
         </div>
         <span className="text-xs text-[rgb(var(--muted))]">
-          <span className="font-semibold tabular-nums text-[rgb(var(--foreground))]">{summary.count}</span>
+          <span className="font-semibold tabular-nums text-[rgb(var(--foreground))]">{selectedTransactions.length}</span>
+          {selectedTransactions.length !== transactions.length && (
+            <span className="tabular-nums"> / {transactions.length}</span>
+          )}
           {" "}{t("chat.statementTransactions")}
         </span>
       </div>
@@ -2647,23 +2748,77 @@ function StatementImportCard({
           </p>
         )}
         <div className="grid grid-cols-2 gap-2">
-          {summary.totalIncome > 0 && (
+          {selectedIncome > 0 && (
             <div className="rounded-xl bg-[rgb(var(--positive-dim))] px-3 py-2.5">
               <p className="mb-1 text-[10px] font-medium text-[rgb(var(--positive))]">{t("chat.statementIncome")}</p>
               <p className="text-sm font-semibold tabular-nums leading-tight text-[rgb(var(--positive))]">
-                +{fmtStatementAmount(summary.totalIncome, summary.currency)}
+                +{fmtStatementAmount(selectedIncome, summary.currency)}
               </p>
             </div>
           )}
-          {summary.totalExpenses > 0 && (
+          {selectedExpenses > 0 && (
             <div className="rounded-xl bg-[rgb(var(--negative-dim))] px-3 py-2.5">
               <p className="mb-1 text-[10px] font-medium text-[rgb(var(--negative))]">{t("chat.statementExpenses")}</p>
               <p className="text-sm font-semibold tabular-nums leading-tight text-[rgb(var(--negative))]">
-                −{fmtStatementAmount(summary.totalExpenses, summary.currency)}
+                −{fmtStatementAmount(selectedExpenses, summary.currency)}
               </p>
             </div>
           )}
         </div>
+        {transactions.length > 0 && (
+          <div className="overflow-hidden rounded-xl border border-[rgb(var(--border-soft))]">
+            <div className="flex items-center justify-between gap-2 bg-[rgb(var(--surface-soft))] px-3 py-2">
+              <button
+                type="button"
+                onClick={() => setExpanded((v) => !v)}
+                className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-[rgb(var(--foreground))]"
+              >
+                {expanded ? <CaretDownIcon size={13} weight="bold" /> : <CaretRightIcon size={13} weight="bold" />}
+                <span>{expanded ? t("chat.statementHideList") : t("chat.statementShowList")}</span>
+              </button>
+              <button
+                type="button"
+                onClick={toggleAll}
+                className="shrink-0 text-xs font-medium text-[rgb(var(--muted))] transition hover:text-[rgb(var(--foreground))]"
+              >
+                {selectedSet.size === transactions.length
+                  ? (isRu ? "Снять все" : "Clear all")
+                  : (isRu ? "Выбрать все" : "Select all")}
+              </button>
+            </div>
+            {expanded && (
+              <div className="max-h-80 overflow-y-auto thin-scrollbar divide-y divide-[rgb(var(--border-soft))]">
+                {transactions.map((tx, index) => {
+                  const checked = selectedSet.has(index);
+                  const isIncome = tx.type === "INCOME";
+                  const title = tx.merchant || tx.comment || (isRu ? "Без описания" : "No description");
+                  return (
+                    <button
+                      key={`${tx.date}-${tx.amount}-${index}`}
+                      type="button"
+                      onClick={() => toggleIndex(index)}
+                      className={`flex w-full items-start gap-2 px-3 py-2 text-left transition hover:bg-[rgb(var(--surface-soft))] ${checked ? "" : "opacity-45"}`}
+                    >
+                      <span className="mt-0.5 shrink-0 text-[rgb(var(--accent))]">
+                        {checked ? <CheckSquareIcon size={16} weight="fill" /> : <SquareIcon size={16} />}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-xs font-medium text-[rgb(var(--foreground))]">{title}</span>
+                        <span className="mt-0.5 block truncate text-[11px] text-[rgb(var(--muted))]">
+                          {fmtStatementDate(tx.date, locale)}
+                          {tx.comment && tx.merchant ? ` · ${tx.comment}` : ""}
+                        </span>
+                      </span>
+                      <span className={`shrink-0 text-xs font-semibold tabular-nums ${isIncome ? "text-[rgb(var(--positive))]" : "text-[rgb(var(--negative))]"}`}>
+                        {isIncome ? "+" : "−"}{fmtStatementAmount(tx.amount, tx.currency || summary.currency)}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Actions / saving */}
@@ -2701,9 +2856,12 @@ function StatementImportCard({
           <div className="flex gap-2">
             <button
               onClick={onConfirm}
-              className="flex h-9 flex-1 items-center justify-center rounded-xl bg-[rgb(var(--foreground))] text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-80 active:scale-[0.98]"
+              disabled={selectedTransactions.length === 0}
+              className="flex h-9 flex-1 items-center justify-center rounded-xl bg-[rgb(var(--foreground))] text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-80 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {t("chat.statementImportConfirm")}
+              {selectedTransactions.length === transactions.length
+                ? t("chat.statementImportConfirm")
+                : `${isRu ? "Импортировать" : "Import"} ${selectedTransactions.length}`}
             </button>
             <button
               onClick={onReject}
