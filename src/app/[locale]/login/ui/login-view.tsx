@@ -3,7 +3,12 @@
 import { createSupabaseBrowserClient } from "@/shared/lib/supabase/client";
 import { LanguageSwitcher } from "@/shared/ui/language-switcher";
 import { ThemeSwitcher } from "@/shared/ui/theme-switcher";
-import { ArrowRightIcon, FacebookLogoIcon, GoogleLogoIcon, PaperPlaneTiltIcon } from "@phosphor-icons/react/dist/ssr";
+import {
+  ArrowRightIcon,
+  FacebookLogoIcon,
+  GoogleLogoIcon,
+  PaperPlaneTiltIcon,
+} from "@phosphor-icons/react/dist/ssr";
 import { useEffect, useRef, useState } from "react";
 
 type TelegramUser = {
@@ -31,6 +36,7 @@ export function LoginView({ locale }: { locale: string }) {
   const [isLoading, setIsLoading] = useState(false);
   const [sent, setSent] = useState(false);
   const [tgLoading, setTgLoading] = useState(false);
+  const [activeFeatureIndex, setActiveFeatureIndex] = useState(0);
   const tgWidgetRef = useRef<HTMLDivElement>(null);
 
   const isRu = locale === "ru";
@@ -128,110 +134,241 @@ export function LoginView({ locale }: { locale: string }) {
     });
   }
 
-  return (
-    <div className="relative flex min-h-dvh items-center justify-center bg-[rgb(var(--background))] px-4">
-      <div className="absolute right-4 top-4 flex items-center gap-1">
-        <LanguageSwitcher />
-        <ThemeSwitcher />
-      </div>
+  const features = isRu
+    ? [
+      {
+        title: "Записывай расходы в чате",
+        userMessage: "Оплатил 12 500 ₽ за рекламу вчера",
+        assistantTitle: "Расход готов",
+        details: [["Сумма", "−12 500 ₽"], ["Категория", "Реклама"], ["Дата", "Вчера"]],
+      },
+      {
+        title: "Следи за бюджетами",
+        userMessage: "Сколько осталось на рекламу в мае?",
+        assistantTitle: "Бюджет: Реклама",
+        details: [["Лимит", "80 000 ₽"], ["Потрачено", "52 400 ₽"], ["Осталось", "27 600 ₽"]],
+      },
+      {
+        title: "Смотри cash flow",
+        userMessage: "Покажи cash flow за этот месяц",
+        assistantTitle: "Месяц в плюсе",
+        details: [["Доходы", "+243 000 ₽"], ["Расходы", "−178 500 ₽"], ["Итого", "+64 500 ₽"]],
+      },
+    ]
+    : [
+      {
+        title: "Log expenses in chat",
+        userMessage: "Paid $320 for ads yesterday",
+        assistantTitle: "Expense ready",
+        details: [["Amount", "−$320"], ["Category", "Marketing"], ["Date", "Yesterday"]],
+      },
+      {
+        title: "Track budgets",
+        userMessage: "How much is left for ads in May?",
+        assistantTitle: "Budget: Marketing",
+        details: [["Limit", "$2,000"], ["Spent", "$1,310"], ["Left", "$690"]],
+      },
+      {
+        title: "Review cash flow",
+        userMessage: "Show cash flow for this month",
+        assistantTitle: "Month is positive",
+        details: [["Income", "+$6,200"], ["Expenses", "−$4,540"], ["Net", "+$1,660"]],
+      },
+    ];
+  const activeFeature = features[activeFeatureIndex] ?? features[0];
 
-      <div className="w-full max-w-sm">
-        <div className="mb-10">
-          <div className="mb-1 text-[13px] font-semibold uppercase tracking-widest text-[rgb(var(--accent))]">
-            LUCA
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setActiveFeatureIndex((index) => (index + 1) % features.length);
+    }, 3500);
+
+    return () => window.clearInterval(timer);
+  }, [features.length]);
+
+  return (
+    <div className="grid min-h-dvh bg-[rgb(var(--background))] lg:grid-cols-[minmax(0,1fr)_minmax(440px,0.78fr)]">
+      <section className="hidden min-h-dvh bg-[#11140f] text-white lg:flex lg:flex-col">
+        <div className="px-12 pt-10 text-xl font-semibold text-[#f3f4ed]">LUCA</div>
+
+        <div className="flex flex-1 items-center px-12 py-10">
+          <div className="w-full max-w-[700px]">
+            <h2 className="mb-10 max-w-2xl text-[2.05rem] font-semibold leading-tight text-[#c7f05b] xl:text-[2.45rem]">
+              {isRu ? "Финансы, которые отвечают как чат" : "Finance that responds like chat"}
+            </h2>
+
+            <div key={activeFeature.title} className="luca-feature-fade">
+              <div className="mt-6">
+                <div className="mb-3 flex justify-end">
+                  <div className="max-w-[82%] rounded-2xl rounded-br-md bg-[#f7f7f1] px-4 py-2.5 text-sm font-medium leading-relaxed text-[#151711]">
+                    {activeFeature.userMessage}
+                  </div>
+                </div>
+
+                <div className="max-w-[430px] rounded-2xl rounded-bl-md bg-[#22271f] p-4 shadow-2xl shadow-black/20">
+                  <div className="text-sm font-semibold text-[#f3f4ed]">{activeFeature.assistantTitle}</div>
+                  <div className="mt-3 divide-y divide-white/10 overflow-hidden rounded-xl border border-white/10">
+                    {activeFeature.details.map(([label, value]) => (
+                      <div key={label} className="flex items-center justify-between gap-4 px-3 py-2.5">
+                        <span className="text-xs text-white/55">{label}</span>
+                        <span className="text-xs font-semibold text-[#f3f4ed]">{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-          <h1 className="text-[1.875rem] font-bold tracking-tight text-[rgb(var(--foreground))]">
-            {isRu ? "Войти" : "Sign in"}
-          </h1>
-          <p className="mt-2 text-sm leading-relaxed text-[rgb(var(--muted))]">
-            {isRu
-              ? "AI-first пространство для личных и бизнес-финансов."
-              : "AI-first workspace for personal and business money."}
-          </p>
+        </div>
+      </section>
+
+      <main className="relative flex min-h-dvh items-start justify-center px-4 pb-5 pt-14 lg:items-center lg:py-8">
+        <div className="absolute right-4 top-4 flex items-center gap-1">
+          <LanguageSwitcher />
+          <ThemeSwitcher />
         </div>
 
-        {/* Hidden Telegram widget container */}
-        {TELEGRAM_BOT_NAME && (
-          <div ref={tgWidgetRef} className="absolute -left-[9999px] overflow-hidden" aria-hidden />
-        )}
-
-        {sent ? (
-          <div className="rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-6 text-center">
-            <div className="mb-3 text-3xl">✉️</div>
-            <div className="font-semibold">
-              {isRu ? "Проверь почту" : "Check your email"}
+        <div className="w-full max-w-[420px]">
+          <div className="mb-5 lg:hidden">
+            <div className="mb-3 text-xl font-semibold text-[rgb(var(--foreground))]">LUCA</div>
+            <div className="mb-3 text-[1.25rem] font-semibold leading-tight text-[rgb(var(--accent))]">
+              {isRu ? "Финансы в формате чата" : "Finance in chat form"}
             </div>
-            <p className="mt-1.5 text-sm text-[rgb(var(--muted))]">
+            <div key={activeFeature.title} className="luca-feature-fade">
+              <div className="mt-6">
+                <div className="mb-2 flex justify-end">
+                  <div className="max-w-[86%] rounded-2xl rounded-br-md bg-[rgb(var(--foreground))] px-3 py-2 text-[13px] leading-relaxed text-[rgb(var(--background))]">
+                    {activeFeature.userMessage}
+                  </div>
+                </div>
+                <div className="rounded-2xl rounded-bl-md bg-[rgb(var(--surface-soft))] p-3">
+                  <div className="mb-2 text-[13px] font-semibold text-[rgb(var(--foreground))]">
+                    {activeFeature.assistantTitle}
+                  </div>
+                  <div className="space-y-1.5">
+                    {activeFeature.details.slice(0, 2).map(([label, value]) => (
+                      <div key={label} className="flex items-center justify-between gap-3 text-[10px]">
+                        <span className="text-[rgb(var(--muted))]">{label}</span>
+                        <span className="font-semibold text-[rgb(var(--foreground))]">{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mb-6 text-center lg:mb-8 lg:text-left">
+            <h1 className="text-[1.8rem] font-semibold leading-tight text-[rgb(var(--foreground))] lg:text-[2rem]">
+              {isRu ? "Войти в LUCA" : "Log in to LUCA"}
+            </h1>
+            <p className="mt-2 text-sm leading-relaxed text-[rgb(var(--muted))] lg:text-base">
               {isRu
-                ? `Magic link отправлен на ${email}`
-                : `Magic link sent to ${email}`}
+                ? "Продолжи работу с операциями, счетами и отчетами."
+                : "Continue with your transactions, accounts and reports."}
             </p>
           </div>
-        ) : (
-          <div className="space-y-3">
-            <button
-              onClick={signInWithGoogle}
-              className="flex h-11 w-full items-center justify-center gap-2.5 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] text-sm font-medium transition-colors hover:bg-[rgb(var(--surface-soft))] active:scale-[0.99]"
-            >
-              <GoogleLogoIcon size={15} weight="bold" />
-              {isRu ? "Продолжить с Google" : "Continue with Google"}
-            </button>
 
-            <button
-              onClick={signInWithFacebook}
-              className="flex h-11 w-full items-center justify-center gap-2.5 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] text-sm font-medium transition-colors hover:bg-[rgb(var(--surface-soft))] active:scale-[0.99]"
-            >
-              <FacebookLogoIcon size={15} weight="bold" />
-              {isRu ? "Продолжить с Facebook" : "Continue with Facebook"}
-            </button>
+          {/* Hidden Telegram widget container */}
+          {TELEGRAM_BOT_NAME && (
+            <div ref={tgWidgetRef} className="absolute -left-[9999px] overflow-hidden" aria-hidden />
+          )}
 
-            {TELEGRAM_BOT_NAME && (
-              <button
-                onClick={triggerTelegramWidget}
-                disabled={tgLoading}
-                className="flex h-11 w-full items-center justify-center gap-2.5 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] text-sm font-medium transition-colors hover:bg-[rgb(var(--surface-soft))] active:scale-[0.99] disabled:opacity-50"
-              >
-                <PaperPlaneTiltIcon size={15} weight="bold" />
-                {tgLoading
-                  ? (isRu ? "Входим..." : "Signing in…")
-                  : (isRu ? "Продолжить с Telegram" : "Continue with Telegram")}
-              </button>
-            )}
-
-            <div className="flex items-center gap-3">
-              <div className="h-px flex-1 bg-[rgb(var(--border))]" />
-              <span className="text-xs text-[rgb(var(--muted))]">
-                {isRu ? "или по email" : "or with email"}
-              </span>
-              <div className="h-px flex-1 bg-[rgb(var(--border))]" />
+          {sent ? (
+            <div className="rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-6 text-center">
+              <div className="mb-3 text-3xl">✉️</div>
+              <div className="font-semibold">
+                {isRu ? "Проверь почту" : "Check your email"}
+              </div>
+              <p className="mt-1.5 text-sm text-[rgb(var(--muted))]">
+                {isRu
+                  ? `Magic link отправлен на ${email}`
+                  : `Magic link sent to ${email}`}
+              </p>
             </div>
-
-            <div className="flex gap-2">
-              <input
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && signInWithEmail()}
-                placeholder={isRu ? "email@example.com" : "you@example.com"}
-                type="email"
-                className="h-11 min-w-0 flex-1 rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-3.5 text-sm outline-none transition placeholder:text-[rgb(var(--muted))] focus:border-[rgb(var(--accent))] focus:ring-2 focus:ring-[rgb(var(--accent)/0.12)]"
-              />
+          ) : (
+            <div className="space-y-3">
               <button
-                onClick={signInWithEmail}
-                disabled={!email || isLoading}
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[rgb(var(--accent))] text-white transition hover:bg-[rgb(var(--accent-hover))] disabled:opacity-40 active:scale-[0.97]"
+                onClick={signInWithGoogle}
+                className="flex h-12 w-full items-center justify-center gap-3 rounded-full border border-[rgb(var(--border))] bg-[rgb(var(--surface))] text-sm font-medium transition-colors hover:bg-[rgb(var(--surface-soft))] active:scale-[0.99] lg:h-14 lg:text-[15px]"
               >
-                <ArrowRightIcon size={15} weight="bold" />
+                <GoogleLogoIcon size={15} weight="bold" />
+                {isRu ? "Продолжить с Google" : "Continue with Google"}
               </button>
-            </div>
-          </div>
-        )}
 
-        <p className="mt-8 text-center text-xs text-[rgb(var(--muted))]">
-          {isRu
-            ? "Входя, ты соглашаешься с условиями использования LUCA."
-            : "By signing in, you agree to LUCA's terms of service."}
-        </p>
-      </div>
+              <button
+                onClick={signInWithFacebook}
+                className="flex h-12 w-full items-center justify-center gap-3 rounded-full border border-[rgb(var(--border))] bg-[rgb(var(--surface))] text-sm font-medium transition-colors hover:bg-[rgb(var(--surface-soft))] active:scale-[0.99] lg:h-14 lg:text-[15px]"
+              >
+                <FacebookLogoIcon size={15} weight="bold" />
+                {isRu ? "Продолжить с Facebook" : "Continue with Facebook"}
+              </button>
+
+              {TELEGRAM_BOT_NAME && (
+                <button
+                  onClick={triggerTelegramWidget}
+                  disabled={tgLoading}
+                  className="flex h-12 w-full items-center justify-center gap-3 rounded-full border border-[rgb(var(--border))] bg-[rgb(var(--surface))] text-sm font-medium transition-colors hover:bg-[rgb(var(--surface-soft))] active:scale-[0.99] disabled:opacity-50 lg:h-14 lg:text-[15px]"
+                >
+                  <PaperPlaneTiltIcon size={15} weight="bold" />
+                  {tgLoading
+                    ? (isRu ? "Входим..." : "Signing in…")
+                    : (isRu ? "Продолжить с Telegram" : "Continue with Telegram")}
+                </button>
+              )}
+
+              <div className="flex items-center gap-3">
+                <div className="h-px flex-1 bg-[rgb(var(--border))]" />
+                <span className="text-xs uppercase text-[rgb(var(--muted))]">
+                  {isRu ? "или" : "or"}
+                </span>
+                <div className="h-px flex-1 bg-[rgb(var(--border))]" />
+              </div>
+
+              <div className="space-y-3">
+                <input
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && signInWithEmail()}
+                  placeholder={isRu ? "Email" : "Email address"}
+                  type="email"
+                  className="h-12 w-full rounded-full border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-5 text-sm outline-none transition placeholder:text-[rgb(var(--muted))] focus:border-[rgb(var(--accent))] focus:ring-2 focus:ring-[rgb(var(--accent)/0.12)] lg:h-14 lg:px-6 lg:text-[15px]"
+                />
+                <button
+                  onClick={signInWithEmail}
+                  disabled={!email || isLoading}
+                  className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[rgb(var(--foreground))] text-sm font-medium text-[rgb(var(--background))] transition hover:opacity-85 disabled:opacity-40 active:scale-[0.98] lg:h-14 lg:text-[15px]"
+                >
+                  {isLoading ? (isRu ? "Отправляем..." : "Sending...") : (isRu ? "Продолжить" : "Continue")}
+                  {!isLoading && <ArrowRightIcon size={15} weight="bold" />}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <p className="mt-5 text-center text-xs text-[rgb(var(--muted))] lg:mt-8">
+            {isRu
+              ? "Входя, ты соглашаешься с условиями использования LUCA."
+              : "By signing in, you agree to LUCA's terms of service."}
+          </p>
+        </div>
+      </main>
+      <style jsx>{`
+        .luca-feature-fade {
+          animation: luca-feature-fade 1500ms ease both;
+        }
+
+        @keyframes luca-feature-fade {
+          from {
+            opacity: 0;
+            transform: translateY(8px);
+          }
+
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+      `}</style>
     </div>
   );
 }

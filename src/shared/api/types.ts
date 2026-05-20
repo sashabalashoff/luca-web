@@ -71,6 +71,10 @@ export type ParsedTransaction = {
   comment?: string | null;
   date: string;
   confidence: number;
+  sourceRecordId?: string | null;
+  sourceAmountId?: string | null;
+  isDuplicate?: boolean;
+  duplicateOfTransactionId?: string | null;
   tags?: string[];
   items?: TransactionItem[];
 };

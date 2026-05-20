@@ -52,14 +52,15 @@ export async function middleware(request: NextRequest) {
 
   const isAppRoute = pathname.match(/^\/(en|ru)\/app/);
   const isLoginRoute = pathname.match(/^\/(en|ru)\/login/);
+  const isHomeRoute = pathname.match(/^\/(en|ru)\/?$/);
 
-  if (!user && isAppRoute) {
+  if (!user && (isAppRoute || isHomeRoute)) {
     const url = request.nextUrl.clone();
     url.pathname = `/${firstSegment}/login`;
     return NextResponse.redirect(url);
   }
 
-  if (user && isLoginRoute) {
+  if (user && (isLoginRoute || isHomeRoute)) {
     const url = request.nextUrl.clone();
     url.pathname = `/${firstSegment}/app`;
     return NextResponse.redirect(url);

@@ -77,9 +77,12 @@ type ChatAction = {
 
 type StatementSummary = {
   count: number;
+  newCount?: number;
+  duplicateCount?: number;
   periodFrom: string | null;
   periodTo: string | null;
   accountName: string | null;
+  accountNumber?: string | null;
   totalIncome: number;
   totalExpenses: number;
   currency: string;
@@ -567,7 +570,8 @@ export function ChatPageClient() {
       }
 
       const overrides = buildInitialOverrides(data.operations, accounts, defaultAccount?.id);
-      const selectedTransactionIndexes = getOperationTransactions(data.operations).map((_, index) => index);
+      const selectedTransactionIndexes = getOperationTransactions(data.operations)
+        .flatMap((tx, index) => (tx.isDuplicate ? [] : [index]));
 
       setMessages((prev) =>
         prev.map((m) =>
@@ -610,6 +614,7 @@ export function ChatPageClient() {
     const overrides = action.overrides ?? [];
     const selectedTransactionIndexes = action.selectedTransactionIndexes;
     const operationsToSave = filterCreateTransactionOperations(operations, selectedTransactionIndexes);
+    const statementAccountId = msg?.importSummary ? action.overrides?.[0]?.accountId : undefined;
 
     const hasTx = operationsToSave.some((op) => op.type === "CREATE_TRANSACTIONS");
     if (hasTx && !defaultAccount) return;
@@ -658,7 +663,7 @@ export function ChatPageClient() {
               ...(token ? { Authorization: `Bearer ${token}` } : {}),
             },
             body: JSON.stringify({
-              accountId: defaultAccount?.id ?? null,
+              accountId: statementAccountId ?? defaultAccount?.id ?? null,
               selectedTransactionIndexes,
             }),
             signal: controller.signal,
@@ -885,6 +890,20 @@ export function ChatPageClient() {
     );
   }
 
+  function updateStatementAccount(actionId: string, accountId: string) {
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.action?.id !== actionId) return m;
+        const transactionCount = getOperationTransactions(m.action.operations).length;
+        const overrides = Array.from({ length: transactionCount }, (_, index) => ({
+          ...(m.action?.overrides?.[index] ?? {}),
+          accountId,
+        }));
+        return { ...m, action: { ...m.action, overrides } };
+      })
+    );
+  }
+
   return (
     <div className="absolute inset-0 flex flex-col overflow-hidden">
       {/* ── Message area ── */}
@@ -957,6 +976,7 @@ export function ChatPageClient() {
                   onStop={stopImport}
                   onUpdateOverride={updateOverride}
                   onUpdateStatementSelection={updateStatementSelection}
+                  onUpdateStatementAccount={updateStatementAccount}
                   onFeedback={sendFeedback}
                   onRetry={retryAssistantMessage}
                   t={t}
@@ -2069,6 +2089,7 @@ function MessageRow({
   onStop,
   onUpdateOverride,
   onUpdateStatementSelection,
+  onUpdateStatementAccount,
   onFeedback,
   onRetry,
   t,
@@ -2082,6 +2103,7 @@ function MessageRow({
   onStop: () => void;
   onUpdateOverride: (actionId: string, txIndex: number, patch: Partial<TransactionOverride>) => void;
   onUpdateStatementSelection: (actionId: string, selectedTransactionIndexes: number[]) => void;
+  onUpdateStatementAccount: (actionId: string, accountId: string) => void;
   onFeedback: (messageId: string, rating: "UP" | "DOWN") => void;
   onRetry: (messageId: string) => void;
   t: (key: string) => string;
@@ -2153,6 +2175,9 @@ function MessageRow({
             summary={message.importSummary}
             transactions={getOperationTransactions(message.action.operations)}
             selectedIndexes={message.action.selectedTransactionIndexes}
+            accounts={accounts}
+            selectedAccountId={message.action.overrides?.[0]?.accountId}
+            onAccountChange={(accountId) => onUpdateStatementAccount(message.action!.id, accountId)}
             onSelectionChange={(indexes) => onUpdateStatementSelection(message.action!.id, indexes)}
             onConfirm={() => onConfirm(message.action!.id)}
             onReject={() => onReject(message.action!.id)}
@@ -3047,6 +3072,9 @@ function StatementImportCard({
   summary,
   transactions,
   selectedIndexes,
+  accounts,
+  selectedAccountId,
+  onAccountChange,
   onSelectionChange,
   onConfirm,
   onReject,
@@ -3059,6 +3087,9 @@ function StatementImportCard({
   summary: StatementSummary;
   transactions: ParsedTransaction[];
   selectedIndexes?: number[];
+  accounts: { id: string; name: string; currency: string; currentBalance?: string | number; type?: string; isDebt?: boolean }[];
+  selectedAccountId?: string;
+  onAccountChange: (accountId: string) => void;
   onSelectionChange: (indexes: number[]) => void;
   onConfirm: () => void;
   onReject: () => void;
@@ -3075,6 +3106,8 @@ function StatementImportCard({
   const offset = circumference * (1 - progress);
   const selectedSet = new Set(selectedIndexes ?? transactions.map((_, index) => index));
   const selectedTransactions = transactions.filter((_, index) => selectedSet.has(index));
+  const duplicateCount = summary.duplicateCount ?? transactions.filter((tx) => tx.isDuplicate).length;
+  const newCount = summary.newCount ?? transactions.length - duplicateCount;
   const selectedIncome = selectedTransactions
     .filter((tx) => tx.type === "INCOME")
     .reduce((sum, tx) => sum + tx.amount, 0);
@@ -3126,6 +3159,36 @@ function StatementImportCard({
             {fmtStatementDate(summary.periodFrom, "ru")} — {fmtStatementDate(summary.periodTo, "ru")}
           </p>
         )}
+        {accounts.length > 0 && (
+          <AccountPicker
+            accounts={accounts}
+            value={selectedAccountId ?? accounts[0]?.id}
+            onChange={onAccountChange}
+            label={isRu ? "Счет для импорта" : "Import account"}
+          />
+        )}
+        <div className="flex flex-wrap gap-2">
+          <span className="rounded-full bg-[rgb(var(--positive-dim))] px-2.5 py-1 text-[11px] font-medium text-[rgb(var(--positive))]">
+            {isRu ? "Новые" : "New"}: {newCount}
+          </span>
+          {duplicateCount > 0 && (
+            <span className="rounded-full bg-[rgb(var(--warning-dim))] px-2.5 py-1 text-[11px] font-medium text-[rgb(var(--warning))]">
+              {isRu ? "Дубли" : "Duplicates"}: {duplicateCount}
+            </span>
+          )}
+          {summary.accountNumber && (
+            <span className="rounded-full border border-[rgb(var(--border-soft))] px-2.5 py-1 text-[11px] text-[rgb(var(--muted))]">
+              {summary.accountNumber}
+            </span>
+          )}
+        </div>
+        {duplicateCount > 0 && (
+          <p className="rounded-xl bg-[rgb(var(--warning-dim))] px-3 py-2 text-xs leading-relaxed text-[rgb(var(--warning))]">
+            {isRu
+              ? `Найдено ${duplicateCount} операций, которые уже есть в базе. Они сняты с выбора, но их можно отметить вручную.`
+              : `${duplicateCount} transactions already exist. They are unselected by default, but you can select them manually.`}
+          </p>
+        )}
         <div className="grid grid-cols-2 gap-2">
           {selectedIncome > 0 && (
             <div className="rounded-xl bg-[rgb(var(--positive-dim))] px-3 py-2.5">
@@ -3171,6 +3234,7 @@ function StatementImportCard({
                   const checked = selectedSet.has(index);
                   const isIncome = tx.type === "INCOME";
                   const title = tx.merchant || tx.comment || (isRu ? "Без описания" : "No description");
+                  const isDuplicate = Boolean(tx.isDuplicate);
                   return (
                     <button
                       key={`${tx.date}-${tx.amount}-${index}`}
@@ -3183,9 +3247,16 @@ function StatementImportCard({
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-xs font-medium text-[rgb(var(--foreground))]">{title}</span>
-                        <span className="mt-0.5 block truncate text-[11px] text-[rgb(var(--muted))]">
-                          {fmtStatementDate(tx.date, locale)}
-                          {tx.comment && tx.merchant ? ` · ${tx.comment}` : ""}
+                        <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-[rgb(var(--muted))]">
+                          <span className="truncate">
+                            {fmtStatementDate(tx.date, locale)}
+                            {tx.comment && tx.merchant ? ` · ${tx.comment}` : ""}
+                          </span>
+                          {isDuplicate && (
+                            <span className="shrink-0 rounded-full bg-[rgb(var(--warning-dim))] px-1.5 py-0.5 font-medium text-[rgb(var(--warning))]">
+                              {isRu ? "дубль" : "duplicate"}
+                            </span>
+                          )}
                         </span>
                       </span>
                       <span className={`shrink-0 text-xs font-semibold tabular-nums ${isIncome ? "text-[rgb(var(--positive))]" : "text-[rgb(var(--negative))]"}`}>
@@ -3305,6 +3376,12 @@ function StatementSavedCard({
   const allTx = operations.flatMap((op) =>
     op.type === "CREATE_TRANSACTIONS" ? (op as CreateTransactionsOp).transactions : []
   );
+  const savedIncome = allTx
+    .filter((tx) => tx.type === "INCOME")
+    .reduce((sum, tx) => sum + tx.amount, 0);
+  const savedExpenses = allTx
+    .filter((tx) => tx.type === "EXPENSE")
+    .reduce((sum, tx) => sum + tx.amount, 0);
 
   return (
     <div className="overflow-hidden rounded-2xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))]">
@@ -3315,7 +3392,7 @@ function StatementSavedCard({
             <CheckIcon size={9} weight="bold" className="text-white" />
           </div>
           <span className="text-sm font-semibold">
-            {summary.count} {t("chat.statementTransactions")} · {t("chat.statementImported")}
+            {allTx.length || summary.count} {t("chat.statementTransactions")} · {t("chat.statementImported")}
           </span>
         </div>
         {allTx.length > 0 && (
@@ -3335,14 +3412,14 @@ function StatementSavedCard({
             {fmtStatementDate(summary.periodFrom, locale)} — {fmtStatementDate(summary.periodTo, locale)}
           </span>
         )}
-        {summary.totalIncome > 0 && (
+        {savedIncome > 0 && (
           <span className="text-xs font-medium tabular-nums text-[rgb(var(--positive))]">
-            +{fmtStatementAmount(summary.totalIncome, summary.currency)}
+            +{fmtStatementAmount(savedIncome, summary.currency)}
           </span>
         )}
-        {summary.totalExpenses > 0 && (
+        {savedExpenses > 0 && (
           <span className="text-xs font-medium tabular-nums text-[rgb(var(--negative))]">
-            −{fmtStatementAmount(summary.totalExpenses, summary.currency)}
+            −{fmtStatementAmount(savedExpenses, summary.currency)}
           </span>
         )}
       </div>
