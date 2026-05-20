@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="108" fill="#0a0a0a"/>
+  <!-- L glyph: vertical bar + horizontal foot, centered -->
+  <path d="M144 108h52v248h172v48H144z" fill="#ffffff"/>
+</svg>

@@ -6,6 +6,7 @@ import { useI18n } from "@/shared/i18n/i18n-provider";
 import { createSupabaseBrowserClient } from "@/shared/lib/supabase/client";
 import { useLuca } from "@/shared/providers/luca-provider";
 import {
+  BankIcon,
   BuildingsIcon,
   CheckIcon,
   CreditCardIcon,
@@ -22,9 +23,9 @@ import {
 } from "@phosphor-icons/react/dist/ssr";
 import { useTheme } from "next-themes";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-type SectionId = "profile" | "appearance" | "workspace" | "team" | "ai" | "plan" | "session";
+type SectionId = "profile" | "appearance" | "workspace" | "team" | "ai" | "bank" | "plan" | "session";
 
 const NAV: { id: SectionId; en: string; ru: string; Icon: React.ElementType }[] = [
   { id: "profile", en: "Profile", ru: "Профиль", Icon: UserIcon },
@@ -32,8 +33,13 @@ const NAV: { id: SectionId; en: string; ru: string; Icon: React.ElementType }[] 
   { id: "workspace", en: "Workspace", ru: "Воркспейс", Icon: BuildingsIcon },
   { id: "team", en: "Team", ru: "Команда", Icon: UsersThreeIcon },
   { id: "ai", en: "AI Settings", ru: "Настройки ИИ", Icon: RobotIcon },
+  { id: "bank", en: "Bank Import", ru: "Импорт выписок", Icon: BankIcon },
   { id: "plan", en: "Plan & Version", ru: "Тариф и версия", Icon: CreditCardIcon },
   { id: "session", en: "Session", ru: "Сессия", Icon: SignOutIcon },
+];
+
+const SUPPORTED_BANKS = [
+  { id: "sberbusiness", en: "SberBusiness", ru: "СберБизнес" },
 ];
 
 export default function SettingsPage() {
@@ -58,6 +64,15 @@ export default function SettingsPage() {
   const [savingAiPrompt, setSavingAiPrompt] = useState(false);
   const [aiPromptSaved, setAiPromptSaved] = useState(false);
   const [originalAiPrompt, setOriginalAiPrompt] = useState<string | null>(null);
+
+  /* ── Bank Import ──────────────────────────────── */
+  const [bankImportEnabled, setBankImportEnabled] = useState(false);
+  const [bankImportBank, setBankImportBank] = useState("sberbusiness");
+
+  useEffect(() => {
+    setBankImportEnabled(localStorage.getItem("luca_bank_import_enabled") === "1");
+    setBankImportBank(localStorage.getItem("luca_bank_import_bank") ?? "sberbusiness");
+  }, []);
 
   useEffect(() => {
     apiFetch<{ user: { email: string; name: string | null; aiSystemPrompt: string | null } }>("/api/settings")
@@ -179,7 +194,7 @@ export default function SettingsPage() {
   const [teamLoading, setTeamLoading] = useState(false);
   const [teamSaving, setTeamSaving] = useState(false);
 
-  async function loadTeam() {
+  const loadTeam = useCallback(async () => {
     if (!workspace || !isFeatureEnabled("workspaceMembers")) return;
     setTeamLoading(true);
     try {
@@ -194,11 +209,11 @@ export default function SettingsPage() {
     } finally {
       setTeamLoading(false);
     }
-  }
+  }, [workspace, isFeatureEnabled]);
 
   useEffect(() => {
     loadTeam();
-  }, [workspace, appConfig.flags.workspaceMembers]);
+  }, [loadTeam]);
 
   async function inviteMember() {
     if (!workspace || !inviteForm.email.trim()) return;
@@ -310,21 +325,23 @@ export default function SettingsPage() {
 
         {/* ── Content ── */}
         <div className="min-w-0 flex-1">
-          {/* Mobile tabs */}
-          <div className="mb-6 flex gap-1.5 overflow-x-auto pb-1 md:hidden">
+          {/* Mobile nav grid */}
+          <div className="mb-6 grid grid-cols-4 gap-1.5 md:hidden">
             {navItems.map(({ id, en, ru, Icon }) => (
               <button
                 key={id}
                 onClick={() => setActiveSection(id)}
                 className={[
-                  "flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
+                  "flex flex-col items-center gap-1.5 rounded-xl px-1 py-3 text-center transition-colors",
                   activeSection === id
                     ? "bg-[rgb(var(--foreground))] text-[rgb(var(--background))]"
                     : "bg-[rgb(var(--surface-soft))] text-[rgb(var(--muted))]",
                 ].join(" ")}
               >
-                <Icon size={12} weight="regular" />
-                {locale === "ru" ? ru : en}
+                <Icon size={16} weight={activeSection === id ? "bold" : "regular"} />
+                <span className="line-clamp-1 w-full text-center text-[10px] font-medium leading-tight">
+                  {locale === "ru" ? ru : en}
+                </span>
               </button>
             ))}
           </div>
@@ -700,6 +717,85 @@ export default function SettingsPage() {
                   </button>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* ── Bank Import ── */}
+          {activeSection === "bank" && (
+            <div className="space-y-6">
+              <SectionHeader
+                title={locale === "ru" ? "Импорт выписок" : "Bank Import"}
+                description={
+                  locale === "ru"
+                    ? "Включите импорт и выберите банк. Кнопка загрузки появится в чате."
+                    : "Enable import and select your bank. An upload button will appear in chat."
+                }
+              />
+              <div className="luca-panel divide-y divide-[rgb(var(--border-soft))]">
+                <SettingsRow
+                  label={locale === "ru" ? "Импорт выписок" : "Statement import"}
+                  hint={locale === "ru" ? "Показывать кнопку импорта PDF в чате" : "Show PDF import button in chat"}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !bankImportEnabled;
+                      setBankImportEnabled(next);
+                      localStorage.setItem("luca_bank_import_enabled", next ? "1" : "0");
+                    }}
+                    className={[
+                      "relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors",
+                      bankImportEnabled ? "bg-[rgb(var(--accent))]" : "bg-[rgb(var(--border))]",
+                    ].join(" ")}
+                  >
+                    <span
+                      className={[
+                        "inline-block h-4 w-4 rounded-full bg-white shadow transition-transform",
+                        bankImportEnabled ? "translate-x-6" : "translate-x-1",
+                      ].join(" ")}
+                    />
+                  </button>
+                </SettingsRow>
+
+                {bankImportEnabled && (
+                  <SettingsRow
+                    label={locale === "ru" ? "Банк" : "Bank"}
+                    hint={locale === "ru" ? "Формат банковской выписки" : "Statement format"}
+                  >
+                    <div className="flex flex-wrap gap-2">
+                      {SUPPORTED_BANKS.map((bank) => (
+                        <button
+                          key={bank.id}
+                          type="button"
+                          onClick={() => {
+                            setBankImportBank(bank.id);
+                            localStorage.setItem("luca_bank_import_bank", bank.id);
+                          }}
+                          className={[
+                            "rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
+                            bankImportBank === bank.id
+                              ? "border-[rgb(var(--accent))] bg-[rgb(var(--surface-soft))] text-[rgb(var(--accent))]"
+                              : "border-[rgb(var(--border))] text-[rgb(var(--muted))] hover:border-[rgb(var(--foreground))] hover:text-[rgb(var(--foreground))]",
+                          ].join(" ")}
+                        >
+                          {locale === "ru" ? bank.ru : bank.en}
+                        </button>
+                      ))}
+                    </div>
+                  </SettingsRow>
+                )}
+              </div>
+
+              {!bankImportEnabled && (
+                <div className="rounded-xl border border-dashed border-[rgb(var(--border))] px-4 py-6 text-center">
+                  <BankIcon size={24} weight="regular" className="mx-auto mb-2 text-[rgb(var(--muted))]" />
+                  <p className="text-sm text-[rgb(var(--muted))]">
+                    {locale === "ru"
+                      ? "Включите импорт, чтобы загружать PDF-выписки прямо из чата."
+                      : "Enable import to upload PDF statements directly from chat."}
+                  </p>
+                </div>
+              )}
             </div>
           )}
 

@@ -149,7 +149,7 @@ export function TransactionsPageClient() {
   const [fetchingRate, setFetchingRate] = useState(false);
 
   function buildQuery(cursor?: string) {
-    const p = new URLSearchParams({ workspaceId: workspace!.id, limit: "50" });
+    const p = new URLSearchParams({ workspaceId: workspace!.id, limit: "1000" });
     if (filter !== "ALL") p.set("type", filter);
     if (debouncedSearch) p.set("search", debouncedSearch);
     if (dateFrom) p.set("dateFrom", dateFrom);

@@ -184,6 +184,11 @@ export function ChatPageClient() {
   const [isStatementImporting, setIsStatementImporting] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [bankImportEnabled, setBankImportEnabled] = useState(false);
+
+  useEffect(() => {
+    setBankImportEnabled(localStorage.getItem("luca_bank_import_enabled") === "1");
+  }, []);
 
   useEffect(() => {
     if (!workspace) return;
@@ -272,7 +277,7 @@ export function ChatPageClient() {
       })
       .catch(console.error)
       .finally(() => setHistoryLoading(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, workspace?.id]);
 
   function growTextarea(el: HTMLTextAreaElement) {
@@ -514,7 +519,7 @@ export function ChatPageClient() {
       fd.append("locale", locale);
       if (sessionId) fd.append("sessionId", sessionId);
 
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/ai/import-statement-vision`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/ai/import-statement`, {
         method: "POST",
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: fd,
@@ -537,6 +542,17 @@ export function ChatPageClient() {
         operations: AiOperation[];
         summary: StatementSummary;
         message: string;
+        diagnostics?: {
+          parser?: string;
+          pages?: number;
+          rows?: number;
+          rawTransactions?: number;
+          finalTransactions?: number;
+          merchantGroups?: number;
+          enrichedGroups?: number;
+          aiRequestsEstimated?: number;
+          aiModel?: string | null;
+        };
       };
 
       if (!data.actionId || !data.operations?.length) {
@@ -550,6 +566,9 @@ export function ChatPageClient() {
         return;
       }
 
+      const overrides = buildInitialOverrides(data.operations, accounts, defaultAccount?.id);
+      const selectedTransactionIndexes = getOperationTransactions(data.operations).map((_, index) => index);
+
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantMsgId
@@ -561,7 +580,8 @@ export function ChatPageClient() {
                 id: data.actionId!,
                 status: "PENDING",
                 operations: data.operations,
-                selectedTransactionIndexes: getOperationTransactions(data.operations).map((_, index) => index),
+                overrides,
+                selectedTransactionIndexes,
               },
               importSummary: data.summary,
             }
@@ -895,6 +915,7 @@ export function ChatPageClient() {
               isRecording={isRecording}
               isReceiptScanning={isReceiptScanning}
               isStatementImporting={isStatementImporting}
+              bankImportEnabled={bankImportEnabled}
               onSend={() => sendMessage()}
               onToggleRecording={toggleRecording}
               onReceiptFile={scanReceipt}
@@ -962,6 +983,7 @@ export function ChatPageClient() {
               isRecording={isRecording}
               isReceiptScanning={isReceiptScanning}
               isStatementImporting={isStatementImporting}
+              bankImportEnabled={bankImportEnabled}
               onSend={() => sendMessage()}
               onToggleRecording={toggleRecording}
               onReceiptFile={scanReceipt}
@@ -989,6 +1011,7 @@ function ChatInput({
   isRecording,
   isReceiptScanning,
   isStatementImporting,
+  bankImportEnabled,
   onSend,
   onToggleRecording,
   onReceiptFile,
@@ -1006,6 +1029,7 @@ function ChatInput({
   isRecording: boolean;
   isReceiptScanning: boolean;
   isStatementImporting: boolean;
+  bankImportEnabled: boolean;
   onSend: () => void;
   onToggleRecording: () => void;
   onReceiptFile: (file: File) => void;
@@ -1087,20 +1111,22 @@ function ChatInput({
           <CameraIcon size={18} weight="regular" />
         </button>
 
-        <button
-          type="button"
-          onClick={() => pdfInputRef.current?.click()}
-          disabled={busy || isLoading}
-          title={t("chat.importStatement")}
-          className={[
-            "flex h-10 w-10 items-center justify-center rounded-full transition active:scale-95 disabled:pointer-events-none disabled:opacity-40 sm:h-9 sm:w-9",
-            isStatementImporting
-              ? "text-[rgb(var(--accent))] animate-pulse"
-              : "text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]",
-          ].join(" ")}
-        >
-          <BankIcon size={18} weight="regular" />
-        </button>
+        {bankImportEnabled && (
+          <button
+            type="button"
+            onClick={() => pdfInputRef.current?.click()}
+            disabled={busy || isLoading}
+            title={t("chat.importStatement")}
+            className={[
+              "flex h-10 w-10 items-center justify-center rounded-full transition active:scale-95 disabled:pointer-events-none disabled:opacity-40 sm:h-9 sm:w-9",
+              isStatementImporting
+                ? "text-[rgb(var(--accent))] animate-pulse"
+                : "text-[rgb(var(--muted))] hover:bg-[rgb(var(--surface-soft))] hover:text-[rgb(var(--foreground))]",
+            ].join(" ")}
+          >
+            <BankIcon size={18} weight="regular" />
+          </button>
+        )}
 
         <button
           type="button"
@@ -1349,35 +1375,69 @@ function asArray(value: unknown): unknown[] {
 }
 
 function AnswerPayloadBlock({ payload, t, locale }: { payload: AnswerPayload; t: (k: string) => string; locale: string }) {
+  const { workspace } = useLuca();
+  const currency = workspace?.baseCurrency ?? "";
+
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       {payload.widgets.map((widget, idx) => {
         if (widget.type === "transactions_table") {
           const data = asRecord(widget.data);
           const rows = asArray(data.transactions) as TxItem[];
-          return <RecentTxList key={idx} txs={rows} locale={locale} />;
+          const totalIncome = Number.parseFloat(String(data.totalIncome ?? "0").replace(/,/g, "")) || 0;
+          const totalExpenses = Number.parseFloat(String(data.totalExpenses ?? "0").replace(/,/g, "")) || 0;
+          const count = Number(data.count ?? rows.length);
+          return <RecentTxList key={idx} txs={rows} locale={locale} currency={currency} totalIncome={totalIncome} totalExpenses={totalExpenses} count={count} />;
         }
-        if (widget.type === "spending_chart" || widget.type === "cashflow_chart") {
+        if (widget.type === "cashflow_chart") {
           const rows = asArray(widget.data).map((item) => {
             const r = asRecord(item);
             return {
-              name: String(r.group ?? r.month ?? r.merchant ?? ""),
-              amount: Number.parseFloat(String(r.total ?? r.expenses ?? r.income ?? 0).replace(/,/g, "")) || 0,
+              month: String(r.month ?? ""),
+              income: Number.parseFloat(String(r.income ?? "0").replace(/,/g, "")) || 0,
+              expenses: Number.parseFloat(String(r.expenses ?? "0").replace(/,/g, "")) || 0,
+              net: Number.parseFloat(String(r.net ?? "0").replace(/,/g, "")) || 0,
             };
-          }).filter((row) => row.name);
-          return <InlineBarList key={idx} rows={rows} />;
+          }).filter((r) => r.month);
+          return <CashflowWidget key={idx} rows={rows} currency={currency} locale={locale} />;
+        }
+        if (widget.type === "spending_chart") {
+          const rows = asArray(widget.data).map((item) => {
+            const r = asRecord(item);
+            return {
+              name: String(r.group ?? r.merchant ?? r.category ?? ""),
+              amount: Number.parseFloat(String(r.total ?? "0").replace(/,/g, "")) || 0,
+              count: Number(r.count ?? 0),
+            };
+          }).filter((r) => r.name);
+          return <SpendingBarList key={idx} rows={rows} currency={currency} />;
         }
         if (widget.type === "budget_cards") {
-          return <BudgetPayloadCards key={idx} rows={asArray(widget.data)} t={t} />;
+          return <BudgetPayloadCards key={idx} rows={asArray(widget.data)} currency={currency} />;
         }
         if (widget.type === "goals_cards") {
-          return <GoalPayloadCards key={idx} rows={asArray(widget.data)} />;
+          return <GoalPayloadCards key={idx} rows={asArray(widget.data)} locale={locale} />;
         }
         if (widget.type === "account_balances") {
-          const rows = Array.isArray(widget.data)
-            ? widget.data
-            : Object.entries(asRecord(asRecord(widget.data).byType)).map(([account, balance]) => ({ account, balance }));
-          return <AccountBalancePayload key={idx} rows={rows} />;
+          const data = widget.data;
+          const rows: Array<{ account: string; balance: string; currency: string; isDebt: boolean }> = Array.isArray(data)
+            ? (data as unknown[]).map((item) => {
+                const r = asRecord(item);
+                return {
+                  account: String(r.account ?? r.name ?? ""),
+                  balance: String(r.balance ?? r.total ?? ""),
+                  currency: String(r.currency ?? currency),
+                  isDebt: Boolean(r.isDebt),
+                };
+              })
+            : Object.entries(asRecord(asRecord(data).byType)).map(([account, balance]) => ({
+                account,
+                balance: String(balance),
+                currency,
+                isDebt: false,
+              }));
+          const netWorthData = !Array.isArray(data) ? asRecord(data) : null;
+          return <AccountBalancePayload key={idx} rows={rows} netWorth={netWorthData} currency={currency} />;
         }
         return null;
       })}
@@ -1385,20 +1445,113 @@ function AnswerPayloadBlock({ payload, t, locale }: { payload: AnswerPayload; t:
   );
 }
 
-function InlineBarList({ rows }: { rows: Array<{ name: string; amount: number }> }) {
+function fmt(value: number, currency: string) {
+  return `${currency} ${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+}
+
+function fmtShort(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(0)}K`;
+  return value.toFixed(0);
+}
+
+// ─── Smart spending widget — picks the right layout based on data shape ──────
+
+function SpendingBarList({ rows, currency, locale }: {
+  rows: Array<{ name: string; amount: number; count: number }>;
+  currency: string;
+  locale?: string;
+}) {
   if (!rows.length) return null;
-  const max = Math.max(...rows.map((r) => r.amount), 1);
+
+  // Monthly trend: names look like "2025-01"
+  const isMonthly = /^\d{4}-\d{2}$/.test(rows[0].name);
+  if (isMonthly) {
+    return <MonthlySpendingChart rows={rows} currency={currency} locale={locale ?? "en"} />;
+  }
+
+  // Single stat: one result (usually from a merchant/tag query grouped by category)
+  if (rows.length === 1) {
+    return <SpendingStatCard row={rows[0]} currency={currency} />;
+  }
+
+  // Multi-category breakdown
+  return <CategoryBreakdown rows={rows} currency={currency} />;
+}
+
+// Monthly spending bar chart with tooltip
+function MonthlySpendingChart({ rows, currency, locale }: {
+  rows: Array<{ name: string; amount: number; count: number }>;
+  currency: string;
+  locale: string;
+}) {
+  const dateLocale = locale === "ru" ? "ru-RU" : "en-US";
+  const total = rows.reduce((s, r) => s + r.amount, 0);
+  const totalCount = rows.reduce((s, r) => s + r.count, 0);
+  const avg = total / Math.max(rows.length, 1);
+
+  const data = rows.map((r) => ({
+    month: (() => {
+      try { return new Date(r.name + "-01").toLocaleDateString(dateLocale, { month: "short" }); }
+      catch { return r.name; }
+    })(),
+    amount: r.amount,
+    count: r.count,
+    raw: r.name,
+  }));
+
   return (
-    <div className="mt-1 rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] p-3">
-      <div className="space-y-2">
-        {rows.slice(0, 8).map((row) => (
-          <div key={row.name}>
-            <div className="mb-1 flex items-center justify-between gap-3 text-xs">
-              <span className="min-w-0 truncate">{row.name}</span>
-              <span className="shrink-0 tabular-nums text-[rgb(var(--muted))]">{row.amount.toLocaleString()}</span>
-            </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-[rgb(var(--border))]">
-              <div className="h-full rounded-full bg-[rgb(var(--accent))]" style={{ width: `${Math.max(4, (row.amount / max) * 100)}%` }} />
+    <div className="overflow-hidden rounded-xl border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))]">
+      {/* Header stats */}
+      <div className="grid grid-cols-3 divide-x divide-[rgb(var(--border-soft))] border-b border-[rgb(var(--border-soft))]">
+        <div className="px-3 py-2.5">
+          <p className="text-[10px] text-[rgb(var(--muted))]">Всего</p>
+          <p className="text-sm font-bold tabular-nums text-[rgb(var(--negative))]">{fmt(total, currency)}</p>
+        </div>
+        <div className="px-3 py-2.5">
+          <p className="text-[10px] text-[rgb(var(--muted))]">Транзакций</p>
+          <p className="text-sm font-bold tabular-nums">{totalCount}</p>
+        </div>
+        <div className="px-3 py-2.5">
+          <p className="text-[10px] text-[rgb(var(--muted))]">В среднем / мес</p>
+          <p className="text-sm font-bold tabular-nums">{fmt(avg, currency)}</p>
+        </div>
+      </div>
+      {/* Bar chart */}
+      <div className="px-1 pb-2 pt-3">
+        <ResponsiveContainer width="100%" height={100}>
+          <BarChart data={data} barCategoryGap="20%">
+            <XAxis dataKey="month" tick={{ fontSize: 10, fill: "rgb(var(--muted))" }} axisLine={false} tickLine={false} />
+            <Tooltip
+              cursor={{ fill: "rgb(var(--border-soft))" }}
+              content={({ active, payload }) => {
+                if (!active || !payload?.[0]) return null;
+                const d = payload[0].payload as { month: string; amount: number; count: number };
+                return (
+                  <div className="rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface))] px-2.5 py-2 text-xs shadow-lg">
+                    <p className="font-semibold">{d.month}</p>
+                    <p className="text-[rgb(var(--negative))]">{fmt(d.amount, currency)}</p>
+                    <p className="text-[rgb(var(--muted))]">{d.count} транз.</p>
+                  </div>
+                );
+              }}
+            />
+            <Bar dataKey="amount" radius={[3, 3, 0, 0]}>
+              {data.map((_, i) => (
+                <Cell key={i} fill="rgb(var(--negative))" fillOpacity={0.6} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      {/* Monthly breakdown table */}
+      <div className="divide-y divide-[rgb(var(--border-soft))] border-t border-[rgb(var(--border-soft))]">
+        {rows.map((row) => (
+          <div key={row.name} className="flex items-center justify-between px-3 py-1.5 text-xs">
+            <span className="text-[rgb(var(--muted))]">{data.find(d => d.raw === row.name)?.month ?? row.name}</span>
+            <div className="flex items-center gap-3">
+              <span className="text-[rgb(var(--muted))]">{row.count}×</span>
+              <span className="font-medium tabular-nums">{fmt(row.amount, currency)}</span>
             </div>
           </div>
         ))}
@@ -1407,50 +1560,264 @@ function InlineBarList({ rows }: { rows: Array<{ name: string; amount: number }>
   );
 }
 
-function RecentTxList({ txs, locale }: { txs: TxItem[]; locale: string }) {
+// Single stat card — for merchant/tag queries that return one category row
+function SpendingStatCard({ row, currency }: {
+  row: { name: string; amount: number; count: number };
+  currency: string;
+}) {
+  const avg = row.count > 0 ? row.amount / row.count : 0;
+  return (
+    <div className="overflow-hidden rounded-xl border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))]">
+      <div className="px-4 py-4">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-[rgb(var(--muted))]">{row.name}</p>
+        <p className="mt-1 text-2xl font-bold tabular-nums text-[rgb(var(--negative))]">{fmt(row.amount, currency)}</p>
+        <div className="mt-2 flex items-center gap-4 text-xs text-[rgb(var(--muted))]">
+          <span>{row.count} транзакций</span>
+          {avg > 0 && <span>~{fmt(avg, currency)} за раз</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Multi-category horizontal bars with proportions
+function CategoryBreakdown({ rows, currency }: {
+  rows: Array<{ name: string; amount: number; count: number }>;
+  currency: string;
+}) {
+  const sorted = [...rows].sort((a, b) => b.amount - a.amount).slice(0, 8);
+  const total = sorted.reduce((s, r) => s + r.amount, 0);
+  const max = Math.max(...sorted.map((r) => r.amount), 1);
+  return (
+    <div className="overflow-hidden rounded-xl border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))]">
+      <div className="flex items-center justify-between border-b border-[rgb(var(--border-soft))] px-3 py-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">По категориям</span>
+        <span className="text-xs font-bold tabular-nums">{fmt(total, currency)}</span>
+      </div>
+      <div className="divide-y divide-[rgb(var(--border-soft))]">
+        {sorted.map((row) => {
+          const pct = (row.amount / total) * 100;
+          return (
+            <div key={row.name} className="flex items-center gap-3 px-3 py-2.5">
+              <div className="min-w-0 flex-1">
+                <div className="mb-1 flex items-center justify-between text-xs">
+                  <span className="truncate font-medium">{row.name}</span>
+                  <span className="ml-2 shrink-0 font-semibold tabular-nums text-[rgb(var(--negative))]">{fmt(row.amount, currency)}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[rgb(var(--border))]">
+                    <div className="h-full rounded-full bg-[rgb(var(--negative))]" style={{ width: `${Math.max(3, (row.amount / max) * 100)}%`, opacity: 0.55 }} />
+                  </div>
+                  <span className="w-8 shrink-0 text-right text-[10px] text-[rgb(var(--muted))]">{Math.round(pct)}%</span>
+                </div>
+              </div>
+              {row.count > 0 && <span className="shrink-0 text-[10px] text-[rgb(var(--muted))]">{row.count}×</span>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CashflowWidget({ rows, currency, locale }: { rows: Array<{ month: string; income: number; expenses: number; net: number }>; currency: string; locale: string }) {
+  if (!rows.length) return null;
+  const dateLocale = locale === "ru" ? "ru-RU" : "en-US";
+  function fmtMonth(m: string) {
+    try {
+      return new Date(m + "-01").toLocaleDateString(dateLocale, { month: "short", year: "numeric" });
+    } catch {
+      return m;
+    }
+  }
+  const totalIncome = rows.reduce((s, r) => s + r.income, 0);
+  const totalExpenses = rows.reduce((s, r) => s + r.expenses, 0);
+  const totalNet = rows.reduce((s, r) => s + r.net, 0);
+  return (
+    <div className="overflow-hidden rounded-xl border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))]">
+      <div className="grid grid-cols-3 border-b border-[rgb(var(--border-soft))] px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">
+        <span>{locale === "ru" ? "Месяц" : "Month"}</span>
+        <span className="text-right text-[rgb(var(--positive))]">{locale === "ru" ? "Доход" : "Income"}</span>
+        <span className="text-right">{locale === "ru" ? "Расходы" : "Expenses"} / {locale === "ru" ? "Баланс" : "Net"}</span>
+      </div>
+      <div className="divide-y divide-[rgb(var(--border-soft))]">
+        {rows.map((row) => (
+          <div key={row.month} className="grid grid-cols-3 px-3 py-2 text-xs">
+            <span className="text-[rgb(var(--muted))]">{fmtMonth(row.month)}</span>
+            <span className="text-right font-medium tabular-nums text-[rgb(var(--positive))]">{fmt(row.income, currency)}</span>
+            <div className="text-right">
+              <span className="tabular-nums text-[rgb(var(--negative))]">{fmt(row.expenses, currency)}</span>
+              <span className={["ml-2 font-semibold tabular-nums", row.net >= 0 ? "text-[rgb(var(--positive))]" : "text-[rgb(var(--negative))]"].join(" ")}>
+                {row.net >= 0 ? "+" : ""}{fmt(row.net, currency)}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-3 border-t border-[rgb(var(--border-soft))] bg-[rgb(var(--surface))] px-3 py-2 text-xs font-semibold">
+        <span className="text-[rgb(var(--muted))]">{locale === "ru" ? "Итого" : "Total"}</span>
+        <span className="text-right tabular-nums text-[rgb(var(--positive))]">{fmt(totalIncome, currency)}</span>
+        <div className="text-right">
+          <span className="tabular-nums text-[rgb(var(--negative))]">{fmt(totalExpenses, currency)}</span>
+          <span className={["ml-2 tabular-nums", totalNet >= 0 ? "text-[rgb(var(--positive))]" : "text-[rgb(var(--negative))]"].join(" ")}>
+            {totalNet >= 0 ? "+" : ""}{fmt(totalNet, currency)}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RecentTxList({ txs, locale, currency, totalIncome, totalExpenses, count }: {
+  txs: TxItem[];
+  locale: string;
+  currency: string;
+  totalIncome: number;
+  totalExpenses: number;
+  count: number;
+}) {
   if (!txs.length) return null;
   const dateLocale = locale === "ru" ? "ru-RU" : "en-US";
+  const shown = txs.slice(0, 10);
   return (
-    <div className="mt-1 overflow-hidden rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))]">
-      {txs.slice(0, 8).map((tx, idx) => {
-        const isIncome = tx.type === "INCOME";
-        const amount = Number.parseFloat(String(tx.amount).replace(/,/g, ""));
-        return (
-          <div key={tx.id ?? idx} className="flex items-center gap-2 border-b border-[rgb(var(--border-soft))] px-3 py-2 last:border-0">
-            <div className={["flex h-6 w-6 shrink-0 items-center justify-center rounded-full", isIncome ? "bg-[rgb(var(--positive))]/15" : "bg-[rgb(var(--negative))]/15"].join(" ")}>
-              {isIncome ? <ArrowUpIcon size={10} className="text-[rgb(var(--positive))]" /> : <ArrowDownIcon size={10} className="text-[rgb(var(--negative))]" />}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-medium">{tx.merchant ?? tx.category?.name ?? tx.type}</p>
-              <p className="text-[10px] text-[rgb(var(--muted))]">{new Date(tx.date).toLocaleDateString(dateLocale, { month: "short", day: "numeric" })}</p>
-            </div>
-            <span className={["text-xs font-medium tabular-nums", isIncome ? "text-[rgb(var(--positive))]" : ""].join(" ")}>
-              {isIncome ? "+" : "-"}{tx.currency} {Number.isFinite(amount) ? amount.toLocaleString(undefined, { maximumFractionDigits: 2 }) : tx.amount}
-            </span>
+    <div className="overflow-hidden rounded-xl border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))]">
+      {(totalIncome > 0 || totalExpenses > 0) && (
+        <div className="flex items-center justify-between border-b border-[rgb(var(--border-soft))] px-3 py-2">
+          <span className="text-[11px] text-[rgb(var(--muted))]">
+            {count} {locale === "ru" ? "транз." : "txns"}
+          </span>
+          <div className="flex gap-3 text-xs font-semibold tabular-nums">
+            {totalIncome > 0 && <span className="text-[rgb(var(--positive))]">+{fmt(totalIncome, currency)}</span>}
+            {totalExpenses > 0 && <span className="text-[rgb(var(--negative))]">−{fmt(totalExpenses, currency)}</span>}
           </div>
-        );
-      })}
+        </div>
+      )}
+      <div className="divide-y divide-[rgb(var(--border-soft))]">
+        {shown.map((tx, idx) => {
+          const isIncome = tx.type === "INCOME";
+          const isTransfer = tx.type === "TRANSFER";
+          const amount = Number.parseFloat(String(tx.amount).replace(/,/g, ""));
+          const label = tx.merchant ?? tx.category?.name ?? tx.type;
+          const sub = tx.category?.name && tx.merchant ? tx.category.name : null;
+          return (
+            <div key={tx.id ?? idx} className="flex items-center gap-2.5 px-3 py-2.5">
+              <div className={[
+                "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs",
+                isIncome ? "bg-[rgb(var(--positive))]/15 text-[rgb(var(--positive))]"
+                  : isTransfer ? "bg-[rgb(var(--accent))]/15 text-[rgb(var(--accent))]"
+                  : "bg-[rgb(var(--negative))]/15 text-[rgb(var(--negative))]",
+              ].join(" ")}>
+                {isIncome ? <ArrowUpIcon size={12} weight="bold" /> : isTransfer ? <ArrowUpIcon size={12} weight="bold" style={{ transform: "rotate(45deg)" }} /> : <ArrowDownIcon size={12} weight="bold" />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-medium leading-snug">{label}</p>
+                <p className="text-[10px] leading-tight text-[rgb(var(--muted))]">
+                  {new Date(tx.date).toLocaleDateString(dateLocale, { month: "short", day: "numeric" })}
+                  {sub && <span className="ml-1.5">{sub}</span>}
+                </p>
+              </div>
+              <span className={[
+                "shrink-0 text-xs font-semibold tabular-nums",
+                isIncome ? "text-[rgb(var(--positive))]" : isTransfer ? "text-[rgb(var(--foreground))]" : "text-[rgb(var(--negative))]",
+              ].join(" ")}>
+                {isIncome ? "+" : isTransfer ? "" : "−"}{tx.currency || currency} {Number.isFinite(amount) ? amount.toLocaleString(undefined, { maximumFractionDigits: 2 }) : tx.amount}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-function BudgetPayloadCards({ rows, t }: { rows: unknown[]; t: (k: string) => string }) {
+function BudgetPayloadCards({ rows, currency }: { rows: unknown[]; currency: string }) {
   if (!rows.length) return null;
   return (
-    <div className="mt-1 rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] p-3">
-      <p className="mb-2 text-[11px] font-medium uppercase text-[rgb(var(--muted))]">{t("chat.budgetStatus")}</p>
-      <div className="space-y-2">
+    <div className="overflow-hidden rounded-xl border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))]">
+      <div className="border-b border-[rgb(var(--border-soft))] px-3 py-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">Бюджет</span>
+      </div>
+      <div className="divide-y divide-[rgb(var(--border-soft))]">
         {rows.map((item, idx) => {
           const row = asRecord(item);
-          const pct = Number(row.pctUsed ?? 0);
+          const pct = Math.min(Number(row.pctUsed ?? 0), 100);
+          const isOver = Boolean(row.isOverBudget);
+          const barColor = isOver ? "bg-[rgb(var(--negative))]" : pct >= 80 ? "bg-[rgb(var(--warning,var(--accent)))]" : "bg-[rgb(var(--positive))]";
           return (
-            <div key={idx}>
-              <div className="flex items-center justify-between text-xs">
-                <span>{String(row.category ?? "")}</span>
-                <span className="text-[rgb(var(--muted))]">{String(row.spent ?? "0")} / {String(row.limit ?? "0")}</span>
+            <div key={idx} className="px-3 py-2.5">
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-medium">{String(row.category ?? "")}</span>
+                  {isOver && (
+                    <span className="rounded-full bg-[rgb(var(--negative))]/15 px-1.5 py-0.5 text-[9px] font-semibold text-[rgb(var(--negative))]">
+                      ПЕРЕБОР
+                    </span>
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5 text-xs tabular-nums">
+                  <span className={isOver ? "font-semibold text-[rgb(var(--negative))]" : ""}>{fmt(Number.parseFloat(String(row.spent ?? "0").replace(/,/g, "")) || 0, currency)}</span>
+                  <span className="text-[rgb(var(--muted))]">/</span>
+                  <span className="text-[rgb(var(--muted))]">{fmt(Number.parseFloat(String(row.limit ?? "0").replace(/,/g, "")) || 0, currency)}</span>
+                  <span className={["rounded px-1 py-px text-[10px] font-semibold", isOver ? "text-[rgb(var(--negative))]" : "text-[rgb(var(--muted))]"].join(" ")}>
+                    {Math.round(Number(row.pctUsed ?? 0))}%
+                  </span>
+                </div>
               </div>
-              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[rgb(var(--border))]">
-                <div className="h-full rounded-full bg-[rgb(var(--accent))]" style={{ width: `${Math.min(100, pct)}%` }} />
+              <div className="h-1.5 overflow-hidden rounded-full bg-[rgb(var(--border))]">
+                <div className={["h-full rounded-full transition-all", barColor].join(" ")} style={{ width: `${pct}%` }} />
+              </div>
+              {!isOver && Number.parseFloat(String(row.remaining ?? "0").replace(/,/g, "")) > 0 && (
+                <p className="mt-1 text-[10px] text-[rgb(var(--muted))]">
+                  Осталось: {fmt(Number.parseFloat(String(row.remaining ?? "0").replace(/,/g, "")), currency)}
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function GoalPayloadCards({ rows, locale }: { rows: unknown[]; locale: string }) {
+  if (!rows.length) return null;
+  return (
+    <div className="overflow-hidden rounded-xl border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))]">
+      <div className="border-b border-[rgb(var(--border-soft))] px-3 py-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-[rgb(var(--muted))]">{locale === "ru" ? "Цели" : "Goals"}</span>
+      </div>
+      <div className="divide-y divide-[rgb(var(--border-soft))]">
+        {rows.map((item, idx) => {
+          const row = asRecord(item);
+          const pct = Math.min(Number(row.pct ?? 0), 100);
+          const daysLeft = row.daysLeft != null ? Number(row.daysLeft) : null;
+          const cur = Number.parseFloat(String(row.current ?? "0").replace(/,/g, "")) || 0;
+          const tgt = Number.parseFloat(String(row.target ?? "0").replace(/,/g, "")) || 0;
+          const curr = String(row.currency ?? "");
+          return (
+            <div key={idx} className="px-3 py-2.5">
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <span className="text-xs font-medium">{String(row.name ?? "")}</span>
+                <div className="flex shrink-0 items-center gap-2">
+                  {daysLeft !== null && daysLeft >= 0 && (
+                    <span className="text-[10px] text-[rgb(var(--muted))]">
+                      {daysLeft === 0 ? (locale === "ru" ? "сегодня" : "today") : `${daysLeft}d`}
+                    </span>
+                  )}
+                  <span className={["rounded px-1.5 py-0.5 text-[10px] font-semibold", pct >= 100 ? "bg-[rgb(var(--positive))]/15 text-[rgb(var(--positive))]" : "bg-[rgb(var(--surface))] text-[rgb(var(--muted))]"].join(" ")}>
+                    {Math.round(pct)}%
+                  </span>
+                </div>
+              </div>
+              <div className="mb-1 h-2 overflow-hidden rounded-full bg-[rgb(var(--border))]">
+                <div
+                  className={["h-full rounded-full transition-all", pct >= 100 ? "bg-[rgb(var(--positive))]" : "bg-[rgb(var(--accent))]"].join(" ")}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <div className="flex items-center justify-between text-[10px] text-[rgb(var(--muted))]">
+                <span className="tabular-nums">{curr} {cur.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                <span className="tabular-nums">{curr} {tgt.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
               </div>
             </div>
           );
@@ -1460,44 +1827,56 @@ function BudgetPayloadCards({ rows, t }: { rows: unknown[]; t: (k: string) => st
   );
 }
 
-function GoalPayloadCards({ rows }: { rows: unknown[] }) {
+function AccountBalancePayload({ rows, netWorth, currency }: {
+  rows: Array<{ account: string; balance: string; currency: string; isDebt: boolean }>;
+  netWorth: Record<string, unknown> | null;
+  currency: string;
+}) {
   if (!rows.length) return null;
-  return (
-    <div className="mt-1 rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))] p-3">
-      <div className="space-y-2">
-        {rows.map((item, idx) => {
-          const row = asRecord(item);
-          const pct = Number(row.pct ?? 0);
-          return (
-            <div key={idx}>
-              <div className="flex items-center justify-between text-xs">
-                <span>{String(row.name ?? "")}</span>
-                <span className="text-[rgb(var(--muted))]">{String(row.current ?? "0")} / {String(row.target ?? "0")} {String(row.currency ?? "")}</span>
-              </div>
-              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[rgb(var(--border))]">
-                <div className="h-full rounded-full bg-[rgb(var(--positive))]" style={{ width: `${Math.min(100, pct)}%` }} />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
+  const assets = rows.filter((r) => !r.isDebt);
+  const debts = rows.filter((r) => r.isDebt);
+  const total = netWorth ? String(netWorth.total ?? "") : null;
 
-function AccountBalancePayload({ rows }: { rows: unknown[] }) {
-  if (!rows.length) return null;
+  function BalanceRow({ row }: { row: { account: string; balance: string; currency: string; isDebt: boolean } }) {
+    const bal = Number.parseFloat(String(row.balance).replace(/,/g, ""));
+    return (
+      <div className="flex items-center justify-between px-3 py-2.5 text-xs">
+        <span className={row.isDebt ? "text-[rgb(var(--negative))]" : ""}>{row.account}</span>
+        <span className={["font-semibold tabular-nums", row.isDebt ? "text-[rgb(var(--negative))]" : "text-[rgb(var(--positive))]"].join(" ")}>
+          {row.isDebt ? "−" : "+"}{row.currency || currency} {Number.isFinite(bal) ? Math.abs(bal).toLocaleString(undefined, { maximumFractionDigits: 0 }) : row.balance}
+        </span>
+      </div>
+    );
+  }
+
   return (
-    <div className="mt-1 overflow-hidden rounded-lg border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))]">
-      {rows.map((item, idx) => {
-        const row = asRecord(item);
-        return (
-          <div key={idx} className="flex items-center justify-between border-b border-[rgb(var(--border-soft))] px-3 py-2 text-xs last:border-0">
-            <span>{String(row.account ?? row.name ?? "Account")}</span>
-            <span className="font-medium tabular-nums">{String(row.balance ?? row.total ?? "")} {String(row.currency ?? "")}</span>
+    <div className="overflow-hidden rounded-xl border border-[rgb(var(--border-soft))] bg-[rgb(var(--surface-soft))]">
+      {assets.length > 0 && (
+        <>
+          <div className="border-b border-[rgb(var(--border-soft))] px-3 py-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-[rgb(var(--positive))]">Активы</span>
           </div>
-        );
-      })}
+          <div className="divide-y divide-[rgb(var(--border-soft))]">
+            {assets.map((r, i) => <BalanceRow key={i} row={r} />)}
+          </div>
+        </>
+      )}
+      {debts.length > 0 && (
+        <>
+          <div className="border-y border-[rgb(var(--border-soft))] px-3 py-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-[rgb(var(--negative))]">Обязательства</span>
+          </div>
+          <div className="divide-y divide-[rgb(var(--border-soft))]">
+            {debts.map((r, i) => <BalanceRow key={i} row={r} />)}
+          </div>
+        </>
+      )}
+      {total && (
+        <div className="flex items-center justify-between border-t border-[rgb(var(--border-soft))] bg-[rgb(var(--surface))] px-3 py-2.5">
+          <span className="text-xs font-semibold">Чистые активы</span>
+          <span className="text-xs font-bold tabular-nums">{currency} {total}</span>
+        </div>
+      )}
     </div>
   );
 }

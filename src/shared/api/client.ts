@@ -20,6 +20,9 @@ export async function apiFetch<T>(
 
   const token = session?.access_token;
 
+  const method = (options?.method ?? "GET").toUpperCase();
+  const isGet = method === "GET" || method === "HEAD";
+
   const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}${path}`, {
     ...options,
     headers: {
@@ -27,7 +30,9 @@ export async function apiFetch<T>(
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options?.headers ?? {})
     },
-    cache: "no-store"
+    // GET: respect server Cache-Control headers (private, max-age=60 / 300 / 3600)
+    // Mutations: never use cache
+    ...(isGet ? {} : { cache: "no-store" }),
   });
 
   if (!response.ok) {
